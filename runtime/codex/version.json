@@ -1,14 +1,13 @@
 {
   "dicodeVersion": "0.1.0",
-  "codexVersion": "0.167.0-alpha.3.2",
+  "codexVersion": "0.167.0",
   "platform": "windows-x64",
   "source": "https://github.com/openai/codex (official Codex CLI)",
   "files": {
     "codex.exe": {
-      "sizeBytes": 368941240
-    },
-    "codex-code-mode-host.exe": {},
-    "codex-command-runner.exe": {},
-    "codex-windows-sandbox-setup.exe": {}
-  }
+      "sha256": "edfdd48f8b458af0906e507b4cb05217b326c3d6e515e9f024e05e3b8d650f70",
+      "sizeBytes": 369062704
+    }
+  },
+  "buildTime": "2026-11-09T17:15:31.128Z"
 }

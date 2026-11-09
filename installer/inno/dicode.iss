@@ -9,14 +9,14 @@
 
 [Setup]
 AppId={{7B4F6E2A-1C4D-4F5A-9E3B-2A6D8C1F5E0B}
-AppName={#MyAppName} (Internal Test)
+AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 OutputDir=..\..\release
-OutputBaseFilename=Dicode-Setup-x64-INTERNAL-TEST-NoRuntime
+OutputBaseFilename=Dicode-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -26,8 +26,8 @@ WizardStyle=modern
 [Files]
 ; Dicode standalone EXE (Node 26 ESM SEA)
 Source: "..\..\release\dicode.exe"; DestDir: "{app}"; Flags: ignoreversion
-; Bundled Codex Runtime (only included once distribution is authorized)
-; Source: "..\..\runtime\codex\*"; DestDir: "{app}\runtime\codex"; Flags: ignoreversion recursesubdirs
+; Bundled Codex Runtime (stable 0.167.0)
+Source: "..\..\runtime\codex\*"; DestDir: "{app}\runtime\codex"; Flags: ignoreversion recursesubdirs
 ; Product resources
 Source: "..\..\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 Source: "..\..\runtime\codex\version.json"; DestDir: "{app}\runtime\codex"; Flags: ignoreversion skipifsourcedoesntexist
