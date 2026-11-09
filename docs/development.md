@@ -25,6 +25,7 @@ npm test
 | `npm test` | Unit tests (43) |
 | `npm run test:codex` | Real App Server integration test |
 | `npm run test:core` | Real Dicode Core integration test |
+| `npm run dev` | Start the Dicode TUI (dev) |
 | `npm run verify:app-server` | Phase 1 raw handshake probe |
 
 ## Workspaces
@@ -68,6 +69,9 @@ The adapter is the bottom communication layer. See
 
 The Core is the business layer above the adapter. See
 [docs/core-api.md](core-api.md) for the facade API.
+
+The TUI is the terminal interface above the Core. See
+[docs/tui.md](tui.md) for components, shortcuts, and startup.
 
 ## Regenerating protocol artifacts
 

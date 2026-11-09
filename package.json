@@ -14,11 +14,14 @@
     "test:watch": "vitest",
     "test:codex": "vitest run --config vitest.integration.config.ts codex-flow",
     "test:core": "vitest run --config vitest.integration.config.ts core-flow",
+    "dev": "tsx packages/cli/src/index.ts",
     "verify:app-server": "node tools/verify-app-server.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^18.3.31",
     "eslint": "^9.39.5",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.72.1",
     "vitest": "^2.1.0"

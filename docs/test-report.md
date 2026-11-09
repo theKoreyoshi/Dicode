@@ -12,6 +12,7 @@ Generated 2026-11-09. Codex Runtime `0.167.0-alpha.3.2`.
 | Real integration | `npm run test:codex` | 6/6 PASS |
 | Core unit tests | `npm test` | 62/62 PASS |
 | Core real integration | `npm run test:core` | 6/6 PASS |
+| TUI unit tests | `npm test` | 82/82 PASS |
 
 ## Unit tests (62)
 
@@ -89,3 +90,14 @@ the expected streamed answer.
 - Duplicate approval response -> rejected (unit).
 - Session-level task lock -> duplicate submission rejected (unit).
 - Unknown adapter events -> dropped, not fatal (unit).
+
+## Phase 4 (TUI)
+
+`npm test` includes 82 tests: the Phase 2-3 suites plus 20 TUI tests covering
+the `uiReducer` (streaming merge, approval modal, status transitions), keyboard
+action resolution (IME-safe, modal handling), formatting helpers, and CLI
+argument parsing.
+
+A real TUI smoke run (PowerShell, `--cwd` to the repository) initialized the
+Core against a live `codex app-server` and rendered the Welcome screen with the
+DICODE logo, `Ready` status, and the detected project path.

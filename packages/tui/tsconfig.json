@@ -6,7 +6,8 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@dicode/shared": ["../shared/src/index.ts"]
+      "@dicode/shared": ["../shared/src/index.ts"],
+      "@dicode/core": ["../core/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]

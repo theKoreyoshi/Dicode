@@ -16,6 +16,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@dicode/shared": "0.1.0"
+    "@dicode/core": "0.1.0",
+    "@dicode/shared": "0.1.0",
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
   }
 }

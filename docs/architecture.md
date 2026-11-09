@@ -133,3 +133,25 @@ packages/core/src/
 - Verified end-to-end against the real App Server: open project, create
   session, send a real task, stream output, persist messages, shutdown,
   restart, and resume the session.
+
+## Phase 4 status
+
+The `@dicode/tui` package provides a React + Ink terminal interface, and
+`@dicode/cli` provides the `dicode` entry point.
+
+```text
+packages/tui/src/
+  app/          App root + useDicodeApp hook (Core lifecycle + UI state)
+  screens/      Welcome, Chat
+  components/   Header, Sidebar, Message, Input, StatusBar, Approval, Palette
+  state/        pure uiReducer + streaming merge
+  theme/        colors, symbols, ASCII logo
+  utils/        keyboard resolution, formatting
+packages/cli/src/
+  index.ts      render(App), --help/--version/--cwd/--resume
+  router.ts     argument parsing
+```
+
+The TUI subscribes to `DicodeCore` events and maps them through a pure reducer
+into UI state; it never touches the adapter. Verified by a real smoke run and
+82 unit tests (see `docs/tui.md` and `docs/test-report.md`).
