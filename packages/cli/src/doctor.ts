@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CodexClient } from "@dicode/codex-adapter";
 import { PRODUCT_VERSION } from "@dicode/shared";
 import { getBundledRuntimeDir, getDataDir } from "@dicode/shared";
@@ -70,6 +70,19 @@ export function checkBundledRuntime(dir = defaultRuntimeDir()): DoctorCheck {
     name: "Bundled Codex Runtime",
     ok: integrity.ok,
     detail: integrity.ok ? `${codex} (${manifest?.codexVersion ?? "unknown"})` : integrity.reason,
+  };
+}
+
+/** Diagnostic: reports the candidate path sources for SEA install-dir resolution. */
+export function pathDiagnostic(): Record<string, string> {
+  return {
+    execPath: process.execPath,
+    argv0: process.argv[0] ?? "",
+    argv1: process.argv[1] ?? "",
+    cwd: process.cwd(),
+    dirnameExecPath: dirname(process.execPath),
+    dirnameArgv0: dirname(process.argv[0] ?? ""),
+    installDir: defaultRuntimeDir(),
   };
 }
 

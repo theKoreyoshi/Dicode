@@ -4,11 +4,16 @@
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+
+const ROOT = process.cwd();
+const DIST = join(ROOT, "dist", "sea");
+const NODE_EXE = process.env.DICODE_SEA_NODE || process.execPath;
+const OUT_EXE = join(ROOT, "release", "dicode.exe");
 
 const NODE_VERSION = execFileSync(NODE_EXE, ["--version"], { encoding: "utf8" }).trim();
 const ESBUILD_VERSION = JSON.parse(readFileSync(require.resolve("esbuild/package.json"), "utf8")).version;
@@ -16,11 +21,6 @@ const POSTJECT_VERSION = JSON.parse(readFileSync(require.resolve("postject/packa
 const DICODE_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
 
 console.log(`Node: ${NODE_VERSION} | esbuild: ${ESBUILD_VERSION} | postject: ${POSTJECT_VERSION} | Dicode: ${DICODE_VERSION}`);
-
-const ROOT = process.cwd();
-const DIST = join(ROOT, "dist", "sea");
-const NODE_EXE = process.env.DICODE_SEA_NODE || process.execPath;
-const OUT_EXE = join(ROOT, "release", "dicode.exe");
 
 mkdirSync(DIST, { recursive: true });
 mkdirSync(join(ROOT, "release"), { recursive: true });

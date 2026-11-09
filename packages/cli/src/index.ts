@@ -14,6 +14,7 @@ import {
   checkUserData,
   checkAppServer,
   checkSqlite,
+  pathDiagnostic,
   readManifest,
   verifyIntegrity,
   sha256File,
@@ -35,6 +36,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     process.stdout.write(`${renderDoctorReport(checks)}\n`);
     return;
   }
+  if (options.paths) {
+    process.stdout.write(`${JSON.stringify(pathDiagnostic(), null, 2)}\n`);
+    return;
+  }
 
   render(createElement(App, { cwd: options.cwd, resume: options.resume }));
 }
@@ -52,6 +57,7 @@ export {
   readManifest,
   verifyIntegrity,
   sha256File,
+  pathDiagnostic,
 };
 
 const entryPath = process.argv[1] ? resolve(process.argv[1]) : "";
