@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@dicode/shared": ["../shared/src/index.ts"],
+      "@dicode/core": ["../core/src/index.ts"],
+      "@dicode/codex-adapter": ["../codex-adapter/src/index.ts"],
+      "@dicode/tui": ["../tui/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
