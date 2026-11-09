@@ -1,18 +1,12 @@
 # Codex Runtime 分发合规性检查
 
-## 结论：阻塞（需人工确认）
+## 结论：满足指定条件后可分发（待权利方最终确认）
 
-本阶段**未**将 `codex.exe` 正式随安装包分发，原因如下：
+阶段 6.1 已联网核查官方仓库 `github.com/openai/codex` 的 LICENSE，为 Apache
+License 2.0。Apache 2.0 允许以对象/二进制形式再分发，但不授予商标权。
 
-1. 当前 Codex 安装目录（`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`）中**未发现
-   LICENSE 文件**，无法确认其重新分发许可条款。
-2. Codex CLI 是 OpenAI 的专有软件，其许可条款可能禁止或限制随第三方产品重新分发。
-3. 项目规范明确要求：**不得使用来源不明的 codex.exe，不得在许可证不允许时擅自绕过授权条件**。
-
-因此，正式发布前必须由具备相应权限的负责人：
-
-- 从官方渠道（https://github.com/openai/codex）确认 `codex.exe` 的许可与分发条款。
-- 确认是否允许随 Dicode 安装包重新分发，或要求用户通过官方渠道单独获取 Codex。
+正式发布仍需满足：稳定版本（非 alpha）、随包附带 LICENSE/NOTICE、确认官方二进制
+组件构成、不暗示 OpenAI 背书。详见 `docs/packaging/runtime-license-audit.md`。
 
 ## 版本锁定与来源记录
 
