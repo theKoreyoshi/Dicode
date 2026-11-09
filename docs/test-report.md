@@ -1,4 +1,4 @@
-# Test Report — Phase 2 (Codex Adapter)
+# Test Report — Phases 2-3
 
 Generated 2026-11-09. Codex Runtime `0.167.0-alpha.3.2`.
 
@@ -10,8 +10,10 @@ Generated 2026-11-09. Codex Runtime `0.167.0-alpha.3.2`.
 | Lint | `npm run lint` | PASS |
 | Unit tests | `npm test` | 43/43 PASS |
 | Real integration | `npm run test:codex` | 6/6 PASS |
+| Core unit tests | `npm test` | 62/62 PASS |
+| Core real integration | `npm run test:core` | 6/6 PASS |
 
-## Unit tests (43)
+## Unit tests (62)
 
 | Module | Coverage | File |
 | --- | --- | --- |
@@ -22,6 +24,10 @@ Generated 2026-11-09. Codex Runtime `0.167.0-alpha.3.2`.
 | JsonRpcClient | correlation, errors, notifications, server requests | `tests/unit/adapter/jsonrpc-client.test.ts` |
 | Event mapper | turn/item/tool/shell/file/unknown mapping | `tests/unit/adapter/event-mapper.test.ts` |
 | Thread/Turn/Approval managers | protocol mapping + state tracking | `tests/unit/adapter/managers.test.ts` |
+| ConfigManager | defaults, merge, validation, corrupt recovery | `tests/unit/core/config.test.ts` |
+| Storage (SQLite) | migrations, session/task/message CRUD | `tests/unit/core/storage.test.ts` |
+| StateManager | update/subscribe/select + subscriber isolation | `tests/unit/core/state.test.ts` |
+| Core managers | session/task/approval/event/project | `tests/unit/core/managers.test.ts` |
 
 ## Real integration (6)
 
@@ -64,3 +70,22 @@ the expected streamed answer.
 - Verified process spawn/stop and stdio separation on Windows 11 x64.
 - The App Server writes to `%USERPROFILE%\.codex`; the integration test requires
   host filesystem/network access (outside the restricted sandbox).
+
+## Phase 3 real integration (6)
+
+`npm run test:core` runs the full Core against the real App Server:
+
+1. `initialize` -> `ready` + capabilities.
+2. `openProject` -> real project with Git detection.
+3. `createSession` + `sendMessage` -> real task, streamed output.
+4. Message history persisted (user + assistant).
+5. Task + tool execution records persisted.
+6. `shutdown` -> restart -> `resumeSession` -> history restored.
+
+## Fault-recovery coverage
+
+- Config corruption -> reset to defaults (unit).
+- Subscriber throwing -> isolated (unit).
+- Duplicate approval response -> rejected (unit).
+- Session-level task lock -> duplicate submission rejected (unit).
+- Unknown adapter events -> dropped, not fatal (unit).

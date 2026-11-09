@@ -16,6 +16,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@dicode/shared": "0.1.0"
+    "@dicode/codex-adapter": "0.1.0",
+    "@dicode/shared": "0.1.0",
+    "zod": "^3.23.8"
   }
 }

@@ -6,7 +6,8 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@dicode/shared": ["../shared/src/index.ts"]
+      "@dicode/shared": ["../shared/src/index.ts"],
+      "@dicode/codex-adapter": ["../codex-adapter/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts"]

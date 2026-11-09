@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:codex": "vitest run --config vitest.integration.config.ts",
+    "test:codex": "vitest run --config vitest.integration.config.ts codex-flow",
+    "test:core": "vitest run --config vitest.integration.config.ts core-flow",
     "verify:app-server": "node tools/verify-app-server.mjs"
   },
   "devDependencies": {

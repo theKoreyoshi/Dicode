@@ -108,3 +108,28 @@ packages/codex-adapter/src/
   thread create/resume, turn start with streamed output, and turn interrupt.
 - Approval decision mapping is implemented and unit-tested; a live approval
   prompt was not triggered in this environment (see `docs/test-report.md`).
+
+## Phase 3 status
+
+The `@dicode/core` package implements the business layer on top of the adapter:
+
+```text
+packages/core/src/
+  application/   DicodeCore facade + lifecycle + AgentAdapter boundary
+  session/       SessionManager (create/resume/list/archive/delete/fork/rename)
+  task/          TaskManager (send/steer/interrupt + session-level lock)
+  event/         EventManager (adapter->Core mapping, sequence, persistence)
+  approval/      ApprovalManager (persistence, decision mapping, duplicate guard)
+  project/       ProjectManager (open/detect-git/list)
+  context/       ContextManager (project/session/task/model/cwd/references)
+  config/        ConfigManager (JSON + Zod validation + corrupt recovery)
+  storage/       SQLite (node:sqlite) + migrations + repositories
+  state/         StateManager (central state + subscribe + selectors)
+  capability/    CapabilityManager (adapter capabilities -> Core capabilities)
+```
+
+- SQLite (`node:sqlite`) with migrations for projects, sessions, tasks,
+  messages, events, approvals, and tool executions.
+- Verified end-to-end against the real App Server: open project, create
+  session, send a real task, stream output, persist messages, shutdown,
+  restart, and resume the session.

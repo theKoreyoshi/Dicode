@@ -24,6 +24,7 @@ npm test
 | `npm run lint` | ESLint |
 | `npm test` | Unit tests (43) |
 | `npm run test:codex` | Real App Server integration test |
+| `npm run test:core` | Real Dicode Core integration test |
 | `npm run verify:app-server` | Phase 1 raw handshake probe |
 
 ## Workspaces
@@ -64,6 +65,9 @@ provider proxy.
 The adapter is the bottom communication layer. See
 [docs/adapter-usage.md](adapter-usage.md) for a minimal usage example and
 [docs/protocol.md](protocol.md) for the verified protocol.
+
+The Core is the business layer above the adapter. See
+[docs/core-api.md](core-api.md) for the facade API.
 
 ## Regenerating protocol artifacts
 

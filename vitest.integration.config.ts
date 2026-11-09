@@ -11,6 +11,17 @@ const alias = {
 
 export default defineConfig({
   resolve: { alias },
+  plugins: [
+    {
+      name: "externalize-node-sqlite",
+      resolveId(id) {
+        if (id === "node:sqlite" || id === "sqlite") {
+          return { id: "node:sqlite", external: true };
+        }
+        return null;
+      },
+    },
+  ],
   test: {
     include: ["tests/integration/**/*.test.ts"],
     environment: "node",
