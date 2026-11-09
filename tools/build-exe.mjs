@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 
 const ROOT = process.cwd();
 const DIST = join(ROOT, "dist", "sea");
-const NODE_EXE = process.execPath;
+const NODE_EXE = process.env.DICODE_SEA_NODE || process.execPath;
 const OUT_EXE = join(ROOT, "release", "dicode.exe");
 
 mkdirSync(DIST, { recursive: true });
@@ -39,19 +39,24 @@ await build({
   minify: false,
   sourcemap: false,
   banner: {
-    js: "globalThis.DICODE_SEA = true;",
+    js: [
+      'import { createRequire as __seaCreateRequire } from "node:module";',
+      "const require = __seaCreateRequire(import.meta.url);",
+      "globalThis.require = require;",
+      "globalThis.DICODE_SEA = true;",
+    ].join("\n"),
   },
 });
 
 console.log("[2/4] writing sea-config.json...");
 writeFileSync(
   join(DIST, "sea-config.json"),
-  JSON.stringify({ main: join(DIST, "bundle.mjs"), output: join(DIST, "sea-prep.blob") }),
+  JSON.stringify({ main: join(DIST, "bundle.mjs"), output: join(DIST, "sea-prep.blob"), mainFormat: "module" }),
   "utf8",
 );
 
 console.log("[3/4] generating SEA blob...");
-execFileSync(process.execPath, ["--experimental-sea-config", join(DIST, "sea-config.json")], {
+execFileSync(NODE_EXE, ["--experimental-sea-config", join(DIST, "sea-config.json")], {
   stdio: "inherit",
   shell: false,
 });
