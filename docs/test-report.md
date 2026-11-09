@@ -13,6 +13,7 @@ Generated 2026-11-09. Codex Runtime `0.167.0-alpha.3.2`.
 | Core unit tests | `npm test` | 62/62 PASS |
 | Core real integration | `npm run test:core` | 6/6 PASS |
 | TUI unit tests | `npm test` | 82/82 PASS |
+| Phase 5 unit tests | `npm test` | 90/90 PASS |
 
 ## Unit tests (62)
 
@@ -101,3 +102,11 @@ argument parsing.
 A real TUI smoke run (PowerShell, `--cwd` to the repository) initialized the
 Core against a live `codex app-server` and rendered the Welcome screen with the
 DICODE logo, `Ready` status, and the detected project path.
+
+## Phase 5
+
+`npm test` is 90 tests: added Slash-command parsing/help, Markdown parsing and
+plain-text conversion, highlight.js line segmentation, and Git porcelain
+parsing. Model list/selection and reasoning effort reuse the verified `model/list`
+and `turn/start.model/effort` protocol paths; capability boundaries are recorded
+in `docs/codex-feature-matrix.md`.

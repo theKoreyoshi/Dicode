@@ -77,6 +77,7 @@ function createMockAdapter(): MockAdapter {
     startTurn: async () => ({ id: "turn-1", status: "inProgress" }),
     steerTurn: async () => {},
     interruptTurn: async () => {},
+    listModels: async () => [],
     onEvent: (listener) => {
       onEventFn = listener;
       return () => {};

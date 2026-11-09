@@ -1,4 +1,4 @@
-import type { ApprovalInfo, CoreEvent, MessageRecord, SessionInfo } from "@dicode/core";
+import type { ApprovalInfo, CoreEvent, MessageRecord, ModelInfo, SessionInfo } from "@dicode/core";
 
 export interface UiMessage {
   id: string;
@@ -22,6 +22,12 @@ export interface UiState {
   commandPaletteOpen: boolean;
   approvalModalOpen: boolean;
   error: string | null;
+  notice: string | null;
+  models: ModelInfo[];
+  selectedModel: string | null;
+  selectedEffort: string | null;
+  modelPickerOpen: boolean;
+  modelIndex: number;
   historyIndex: number;
 }
 
@@ -37,6 +43,14 @@ export type UiAction =
   | { type: "CLOSE_PALETTE" }
   | { type: "TOGGLE_APPROVAL" }
   | { type: "SET_ERROR"; message: string | null }
+  | { type: "SET_NOTICE"; message: string | null }
+  | { type: "SET_MODELS"; models: ModelInfo[] }
+  | { type: "SET_SELECTED_MODEL"; model: string | null }
+  | { type: "SET_SELECTED_EFFORT"; effort: string | null }
+  | { type: "TOGGLE_MODEL_PICKER" }
+  | { type: "NEXT_MODEL" }
+  | { type: "PREV_MODEL" }
+  | { type: "CLEAR_VIEW" }
   | { type: "SET_STATUS"; status: UiStatus }
   | { type: "NEXT_HISTORY" }
   | { type: "PREV_HISTORY" }
@@ -56,6 +70,12 @@ export function createInitialUiState(): UiState {
     commandPaletteOpen: false,
     approvalModalOpen: false,
     error: null,
+    notice: null,
+    models: [],
+    selectedModel: null,
+    selectedEffort: null,
+    modelPickerOpen: false,
+    modelIndex: 0,
     historyIndex: -1,
   };
 }
@@ -84,6 +104,22 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       return { ...state, approvalModalOpen: !state.approvalModalOpen };
     case "SET_ERROR":
       return { ...state, error: action.message };
+    case "SET_NOTICE":
+      return { ...state, notice: action.message };
+    case "SET_MODELS":
+      return { ...state, models: action.models, modelIndex: 0 };
+    case "SET_SELECTED_MODEL":
+      return { ...state, selectedModel: action.model };
+    case "SET_SELECTED_EFFORT":
+      return { ...state, selectedEffort: action.effort };
+    case "TOGGLE_MODEL_PICKER":
+      return { ...state, modelPickerOpen: !state.modelPickerOpen };
+    case "NEXT_MODEL":
+      return { ...state, modelIndex: Math.min(state.modelIndex + 1, state.models.length - 1) };
+    case "PREV_MODEL":
+      return { ...state, modelIndex: Math.max(state.modelIndex - 1, 0) };
+    case "CLEAR_VIEW":
+      return { ...state, messages: [], notice: null };
     case "SET_STATUS":
       return { ...state, status: action.status };
     case "NEXT_HISTORY":

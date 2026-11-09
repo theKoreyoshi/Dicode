@@ -3,6 +3,8 @@ import type { TurnStatus } from "../protocol/protocol-types.js";
 export interface TurnInput {
   /** Plain-text user input. */
   text: string;
+  model?: string;
+  effort?: string;
 }
 
 export interface TurnInfo {

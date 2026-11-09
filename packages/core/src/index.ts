@@ -38,3 +38,5 @@ export * from "./context/context-manager.js";
 export * from "./application/lifecycle.js";
 export * from "./application/agent-adapter.js";
 export * from "./application/dicode-core.js";
+
+export type { ModelInfo, ModelReasoningEffort } from "@dicode/codex-adapter";

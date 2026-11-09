@@ -28,6 +28,8 @@ export class CodexTurnManager implements TurnManager {
       threadId,
       input: [{ type: "text", text: input.text }],
     };
+    if (input.model) (params as { model?: string }).model = input.model;
+    if (input.effort) (params as { effort?: string }).effort = input.effort;
     const result = (await this.request(ClientMethods.turnStart, params)) as TurnResult;
     const turn = toTurnInfo(result.turn);
     this.activeTurns.set(threadId, turn.id);

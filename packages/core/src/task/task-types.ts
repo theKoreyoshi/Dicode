@@ -6,4 +6,6 @@ export type TaskInfo = TaskRecord;
 
 export interface MessageInput {
   text: string;
+  model?: string;
+  effort?: string;
 }

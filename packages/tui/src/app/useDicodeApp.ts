@@ -4,7 +4,7 @@ import {
   type ApprovalDecision,
   type DicodeCore,
 } from "@dicode/core";
-import { createInitialUiState, uiReducer, type UiState } from "../state/ui-store.js";
+import { createInitialUiState, uiReducer, type UiAction, type UiState } from "../state/ui-store.js";
 
 export interface UseDicodeAppOptions {
   core?: DicodeCore;
@@ -23,13 +23,15 @@ export interface DicodeAppApi {
   switchSession: (sessionId: string) => Promise<void>;
   resumeSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, options?: { model?: string; effort?: string }) => Promise<void>;
+  listModels: () => Promise<void>;
   interrupt: () => Promise<void>;
   respondApproval: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
   toggleSidebar: () => void;
   togglePalette: () => void;
   closePalette: () => void;
   reloadSessions: () => void;
+  dispatch: (action: UiAction) => void;
 }
 
 export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
@@ -128,17 +130,24 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
     reloadSessionsRef.current?.();
   }, []);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, options?: { model?: string; effort?: string }) => {
     const c = coreRef.current;
     const sessionId = c?.getState().sessions.currentSessionId;
     if (!c || !sessionId) return;
     dispatch({ type: "ADD_USER_MESSAGE", text });
     setInput("");
     try {
-      await c.sendMessage(sessionId, { text });
+      await c.sendMessage(sessionId, { text, model: options?.model, effort: options?.effort });
     } catch (error) {
       dispatch({ type: "SET_ERROR", message: (error as Error).message });
     }
+  }, []);
+
+  const listModels = useCallback(async () => {
+    const c = coreRef.current;
+    if (!c) return;
+    const models = await c.listModels();
+    dispatch({ type: "SET_MODELS", models });
   }, []);
 
   const interrupt = useCallback(async () => {
@@ -177,11 +186,13 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
     resumeSession,
     deleteSession,
     sendMessage,
+    listModels,
     interrupt,
     respondApproval,
     toggleSidebar: () => dispatch({ type: "TOGGLE_SIDEBAR" }),
     togglePalette: () => dispatch({ type: "TOGGLE_PALETTE" }),
     closePalette: () => dispatch({ type: "CLOSE_PALETTE" }),
     reloadSessions,
+    dispatch,
   };
 }

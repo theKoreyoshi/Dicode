@@ -12,6 +12,7 @@ import { JsonRpcClient } from "../transport/jsonrpc-client.js";
 import { StdioTransport } from "../transport/stdio-transport.js";
 import { CodexTurnManager, type TurnManager } from "../turn/turn-manager.js";
 import type { TurnInput, TurnInfo } from "../turn/turn-types.js";
+import type { ModelInfo, ModelListResult } from "../protocol/protocol-types.js";
 import { CapabilityManager, type AdapterCapabilities } from "./capability-manager.js";
 import { initializeClient, type ClientInfo } from "./initialization.js";
 
@@ -146,6 +147,11 @@ export class CodexClient {
 
   async healthCheck(timeoutMs = 5000): Promise<void> {
     await this.requireRpc().request("model/list", { limit: 1 }, timeoutMs);
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    const result = (await this.requireRpc().request("model/list", {})) as ModelListResult;
+    return result.data ?? [];
   }
 
   createThread(options?: StartThreadOptions): Promise<import("../thread/thread-types.js").ThreadInfo> {

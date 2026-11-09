@@ -8,6 +8,7 @@ import type {
   ResumeThreadOptions,
   StartThreadOptions,
   ThreadInfo,
+  ModelInfo,
   TurnInfo,
   TurnInput,
 } from "@dicode/codex-adapter";
@@ -37,6 +38,7 @@ export interface AgentAdapter {
   startTurn(threadId: string, input: TurnInput): Promise<TurnInfo>;
   steerTurn(threadId: string, input: TurnInput): Promise<void>;
   interruptTurn(threadId: string): Promise<void>;
+  listModels(): Promise<ModelInfo[]>;
   onEvent(listener: (event: DicodeEvent) => void): () => void;
   onStatusChange(listener: (status: string) => void): () => void;
   approvalManager: AgentApprovalManager;

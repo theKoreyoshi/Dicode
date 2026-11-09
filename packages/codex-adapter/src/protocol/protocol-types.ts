@@ -69,3 +69,23 @@ export interface InterruptTurnParams {
   threadId: string;
   turnId: string;
 }
+
+export interface ModelReasoningEffort {
+  reasoningEffort: string;
+  description?: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  model: string;
+  displayName?: string;
+  description?: string;
+  hidden?: boolean;
+  defaultReasoningEffort?: string;
+  supportedReasoningEfforts?: ModelReasoningEffort[];
+}
+
+export interface ModelListResult {
+  data: ModelInfo[];
+  nextCursor?: string | null;
+}

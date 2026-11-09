@@ -7,9 +7,11 @@ import { Header } from "../components/Header.js";
 import { Input } from "../components/Input.js";
 import { StatusBar } from "../components/StatusBar.js";
 import { ApprovalModal } from "../components/ApprovalModal.js";
+import { ModelPicker } from "../components/ModelPicker.js";
 import { Chat } from "../screens/Chat.js";
 import { Welcome } from "../screens/Welcome.js";
 import { resolveKeyAction } from "../utils/keyboard.js";
+import { parseCommand, findCommand, formatHelp } from "../utils/commands.js";
 import { useDicodeApp } from "./useDicodeApp.js";
 
 const COMMANDS: Command[] = [
@@ -35,6 +37,29 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   const inChat = Boolean(app.state.sessionId);
 
   useInput((input, key) => {
+    // Model picker overlay.
+    if (app.state.modelPickerOpen) {
+      if (key.escape) {
+        app.dispatch({ type: "TOGGLE_MODEL_PICKER" });
+        return;
+      }
+      if (key.upArrow) {
+        app.dispatch({ type: "PREV_MODEL" });
+        return;
+      }
+      if (key.downArrow) {
+        app.dispatch({ type: "NEXT_MODEL" });
+        return;
+      }
+      if (key.return) {
+        const model = app.state.models[app.state.modelIndex];
+        if (model) app.dispatch({ type: "SET_SELECTED_MODEL", model: model.model });
+        app.dispatch({ type: "TOGGLE_MODEL_PICKER" });
+        return;
+      }
+      return;
+    }
+
     // Command palette takes priority.
     if (app.state.commandPaletteOpen) {
       if (key.escape) {
@@ -83,7 +108,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     const action = resolveKeyAction({ input, key }, { running, modalOpen: false, inputFocused: true });
     switch (action) {
       case "send":
-        if (app.input.trim()) void app.sendMessage(app.input);
+        if (app.input.trim()) void handleSubmit();
         break;
       case "newline":
         app.setInput(`${app.input}\n`);
@@ -146,6 +171,53 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     }
   }
 
+  async function handleSubmit() {
+    const text = app.input.trim();
+    const parsed = parseCommand(text);
+    if (parsed) {
+      await handleSlashCommand(parsed.command, parsed.args);
+      app.setInput("");
+      return;
+    }
+    await app.sendMessage(text, { model: app.state.selectedModel ?? undefined, effort: app.state.selectedEffort ?? undefined });
+  }
+
+  async function handleSlashCommand(command: string, _args: string) {
+    switch (command) {
+      case "help":
+        app.dispatch({ type: "SET_NOTICE", message: formatHelp() });
+        break;
+      case "status":
+        app.dispatch({ type: "SET_NOTICE", message: `Status: ${app.state.status}` });
+        break;
+      case "new":
+        await app.createSession();
+        break;
+      case "resume":
+        if (app.state.sessions[0]) await app.resumeSession(app.state.sessions[0].id);
+        break;
+      case "model":
+        await app.listModels();
+        app.dispatch({ type: "TOGGLE_MODEL_PICKER" });
+        break;
+      case "effort":
+        app.dispatch({ type: "SET_SELECTED_EFFORT", effort: _args || null });
+        break;
+      case "clear":
+        app.dispatch({ type: "CLEAR_VIEW" });
+        break;
+      case "quit":
+      case "exit":
+      case "q":
+        exit();
+        break;
+      default:
+        if (!findCommand(command)) {
+          app.dispatch({ type: "SET_NOTICE", message: `Unknown command: /${command}. Try /help` });
+        }
+    }
+  }
+
   if (app.state.status === "initializing") {
     return (
       <Box flexDirection="column" padding={1}>
@@ -174,6 +246,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       />
       {inChat ? <Chat state={app.state} /> : <Welcome projectPath={app.state.projectPath} />}
       {app.state.error && <Text color={COLORS.error}>Error: {app.state.error}</Text>}
+      {app.state.notice && <Text color={COLORS.warning}>{app.state.notice}</Text>}
       <Input value={app.input} running={running} />
       <StatusBar status={app.state.status} running={running} />
       {app.state.approvalModalOpen && app.state.pendingApprovals[0] && (
@@ -181,6 +254,13 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       )}
       {app.state.commandPaletteOpen && (
         <CommandPalette commands={filteredCommands} selectedIndex={paletteIndex} />
+      )}
+      {app.state.modelPickerOpen && (
+        <ModelPicker
+          models={app.state.models}
+          selectedIndex={app.state.modelIndex}
+          currentModel={app.state.selectedModel}
+        />
       )}
     </Box>
   );

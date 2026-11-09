@@ -71,7 +71,11 @@ export class TaskManager {
     }
 
     try {
-      const turn = await this.adapter.startTurn(session.codexThreadId, { text: input.text });
+      const turn = await this.adapter.startTurn(session.codexThreadId, {
+        text: input.text,
+        model: input.model,
+        effort: input.effort,
+      });
       task.turnId = turn.id;
       task.status = "running";
       task.startedAt = nowMs();

@@ -155,3 +155,13 @@ packages/cli/src/
 The TUI subscribes to `DicodeCore` events and maps them through a pure reducer
 into UI state; it never touches the adapter. Verified by a real smoke run and
 82 unit tests (see `docs/tui.md` and `docs/test-report.md`).
+
+## Phase 5 status
+
+Phase 5 aligns Dicode with Codex native capabilities and completes product
+interactions. Added: model list/selection and reasoning-effort passthrough
+(`model/list` + `turn/start.model/effort`), Slash Commands (`/help /new /model
+/clear /quit /status /resume`), Markdown rendering + highlight.js syntax
+highlighting, and read-only Git status. The capability inventory is documented
+in [docs/codex-feature-matrix.md](codex-feature-matrix.md) and
+[docs/codex-native-capability.md](codex-native-capability.md).

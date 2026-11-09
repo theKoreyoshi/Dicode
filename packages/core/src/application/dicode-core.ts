@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { CodexClient } from "@dicode/codex-adapter";
+import type { ModelInfo } from "@dicode/codex-adapter";
 import type { ApprovalDecision } from "../approval/approval-types.js";
 import { ApprovalManager } from "../approval/approval-manager.js";
 import { CapabilityManager } from "../capability/capability-manager.js";
@@ -279,6 +280,11 @@ export class DicodeCore {
 
   getContext() {
     return this.contextManager.get();
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    this.requireReady();
+    return this.adapter.listModels();
   }
 
   private buildRepositories() {
