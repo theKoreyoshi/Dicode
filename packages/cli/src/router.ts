@@ -3,10 +3,11 @@ export interface CliOptions {
   resume: boolean;
   help: boolean;
   version: boolean;
+  doctor: boolean;
 }
 
 export function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { resume: false, help: false, version: false };
+  const options: CliOptions = { resume: false, help: false, version: false, doctor: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
@@ -17,6 +18,9 @@ export function parseArgs(argv: string[]): CliOptions {
       case "--version":
       case "-v":
         options.version = true;
+        break;
+      case "--doctor":
+        options.doctor = true;
         break;
       case "--resume":
       case "-r":
@@ -42,4 +46,5 @@ Usage:
   dicode --resume       Resume the most recent session
   dicode --help         Show this help
   dicode --version      Show version
+  dicode --doctor       Run environment diagnostics
 `;

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { RuntimeNotFoundError } from "../errors/adapter-errors.js";
 
 export interface ProcessConfig {
@@ -20,12 +20,13 @@ export interface ResolveProcessConfigOptions {
   listenUrl?: string;
   codexHome?: string;
   env?: NodeJS.ProcessEnv;
+  bundledRuntimeDir?: string;
 }
 
 export function resolveProcessConfig(
   options: ResolveProcessConfigOptions = {},
 ): ProcessConfig {
-  const executablePath = resolveCodexExecutable(options.executablePath);
+  const executablePath = resolveCodexExecutable(options.executablePath, options.bundledRuntimeDir);
   const cwd = options.cwd ?? process.cwd();
   const home = options.codexHome ?? process.env.USERPROFILE ?? homedir();
   const codexHome = options.codexHome ?? join(home, ".codex");
@@ -43,13 +44,20 @@ export function resolveProcessConfig(
   };
 }
 
-export function resolveCodexExecutable(explicit?: string): string {
+export function resolveCodexExecutable(explicit?: string, bundledRuntimeDir?: string): string {
   const candidates: string[] = [];
 
+  // 1. Explicit override (dev/testing).
   if (explicit) candidates.push(explicit);
+  // 2. Environment override (dev only; never used in the shipped product).
   if (process.env.DICODE_CODEX_EXE) candidates.push(process.env.DICODE_CODEX_EXE);
   if (process.env.CODEX_PATH) candidates.push(process.env.CODEX_PATH);
 
+  // 3. Bundled runtime shipped with Dicode (product mode).
+  const bundled = bundledRuntimeDir ?? defaultBundledRuntimeDir();
+  candidates.push(join(bundled, "codex.exe"));
+
+  // 4. System-installed Codex (dev fallback; ignored when bundled exists).
   const localAppData = process.env.LOCALAPPDATA;
   if (localAppData) {
     const binRoot = join(localAppData, "OpenAI", "Codex", "bin");
@@ -82,7 +90,7 @@ export function resolveCodexExecutable(explicit?: string): string {
   }
 
   throw new RuntimeNotFoundError(
-    "Could not locate codex.exe. Provide it via DICODE_CODEX_EXE or an explicit path.",
+    "Could not locate codex.exe. The bundled runtime is missing and no override was provided.",
   );
 }
 
@@ -94,4 +102,9 @@ function findOnPath(name: string): string | null {
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function defaultBundledRuntimeDir(): string {
+  const execDir = dirname(process.execPath);
+  return join(execDir, "..", "runtime", "codex");
 }

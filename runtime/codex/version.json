@@ -1,0 +1,14 @@
+{
+  "dicodeVersion": "0.1.0",
+  "codexVersion": "0.167.0-alpha.3.2",
+  "platform": "windows-x64",
+  "source": "https://github.com/openai/codex (official Codex CLI)",
+  "files": {
+    "codex.exe": {
+      "sizeBytes": 368941240
+    },
+    "codex-code-mode-host.exe": {},
+    "codex-command-runner.exe": {},
+    "codex-windows-sandbox-setup.exe": {}
+  }
+}

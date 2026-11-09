@@ -19,6 +19,10 @@ describe("parseArgs", () => {
     expect(parseArgs(["--resume"]).resume).toBe(true);
   });
 
+  it("parses --doctor", () => {
+    expect(parseArgs(["--doctor"]).doctor).toBe(true);
+  });
+
   it("exposes a non-empty help text", () => {
     expect(HELP_TEXT).toContain("dicode");
   });
