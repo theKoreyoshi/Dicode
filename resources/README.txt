@@ -1,0 +1,1 @@
+Dicode product resources.

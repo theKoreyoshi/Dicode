@@ -9,14 +9,14 @@
 
 [Setup]
 AppId={{7B4F6E2A-1C4D-4F5A-9E3B-2A6D8C1F5E0B}
-AppName={#MyAppName}
+AppName={#MyAppName} (Internal Test)
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 OutputDir=..\..\release
-OutputBaseFilename=Dicode-Setup-x64
+OutputBaseFilename=Dicode-Setup-x64-INTERNAL-TEST-NoRuntime
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -33,9 +33,9 @@ Source: "..\..\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion re
 Source: "..\..\runtime\codex\version.json"; DestDir: "{app}\runtime\codex"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Registry]
-; Add install dir to current-user PATH (no admin required), avoid duplicates.
-Root: HKCU; Subkey: "Environment"; ValueType: string; ValueName: "Path"; \
-  ValueData: "{app}"; Flags: preservestringtype
+; Append install dir to current-user PATH (never overwrite), avoid duplicates.
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
+  ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -47,3 +47,32 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--doctor"; Description: "Run dia
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\runtime\codex"
 Type: filesandordirs; Name: "{app}\resources"
+
+[Code]
+function NeedsAddPath(Param: string): Boolean;
+var
+  OrigPath: string;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', OrigPath) then
+  begin
+    Result := True;
+    exit;
+  end;
+  Result := Pos(';' + Uppercase(Param) + ';', ';' + Uppercase(OrigPath) + ';') = 0;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Path, AppDir: string;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    AppDir := ExpandConstant('{app}');
+    if RegQueryStringValue(HKCU, 'Environment', 'Path', Path) then
+    begin
+      StringChange(Path, ';' + AppDir, '');
+      StringChange(Path, AppDir + ';', '');
+      RegWriteStringValue(HKCU, 'Environment', 'Path', Path);
+    end;
+  end;
+end;
