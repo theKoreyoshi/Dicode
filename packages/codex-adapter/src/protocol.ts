@@ -82,7 +82,9 @@ export const ServerNotificationMethods = {
   fileChangeOutputDelta: "item/fileChange/outputDelta",
   fileChangePatchUpdated: "item/fileChange/patchUpdated",
   reasoningSummaryTextDelta: "item/reasoning/summaryTextDelta",
+  reasoningSummaryPartAdded: "item/reasoning/summaryPartAdded",
   reasoningTextDelta: "item/reasoning/textDelta",
+  threadTokenUsageUpdated: "thread/tokenUsage/updated",
   serverRequestResolved: "serverRequest/resolved",
 } as const;
 

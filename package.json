@@ -9,13 +9,17 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:codex": "vitest run --config vitest.integration.config.ts",
     "verify:app-server": "node tools/verify-app-server.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "eslint": "^9.39.5",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.72.1",
     "vitest": "^2.1.0"
   }
 }

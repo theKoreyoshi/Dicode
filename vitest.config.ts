@@ -12,7 +12,7 @@ const alias = {
 export default defineConfig({
   resolve: { alias },
   test: {
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts"],
     environment: "node",
   },
 });

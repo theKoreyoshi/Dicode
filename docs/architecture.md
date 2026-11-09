@@ -84,3 +84,27 @@ User types a prompt in the TUI
 - JSON-RPC handshake (`initialize` -> `initialized` -> read-only methods)
   verified against a live App Server.
 - Monorepo skeleton and module directories established.
+
+## Phase 2 status
+
+The `@dicode/codex-adapter` package is now fully implemented:
+
+```text
+packages/codex-adapter/src/
+  index.ts                 unified exports + CodexAdapter (alias of CodexClient)
+  protocol/                method registry + typed protocol views
+  process/                 process config, lifecycle, status, crash handling
+  transport/               framing, request manager, stdio transport, JSON-RPC client
+  client/                  CodexClient, initialize handshake, capability tracking
+  thread/                  thread start/resume/list/fork/archive
+  turn/                    turn start/steer/interrupt + active-turn tracking
+  events/                  event bus + raw-to-Dicode event mapping
+  approval/                approval tracking + decision -> protocol response mapping
+  errors/                  unified error hierarchy
+  logger.ts                redacting, rotating logger (stderr + file)
+```
+
+- Verified end-to-end against the real App Server: initialize, model list,
+  thread create/resume, turn start with streamed output, and turn interrupt.
+- Approval decision mapping is implemented and unit-tested; a live approval
+  prompt was not triggered in this environment (see `docs/test-report.md`).

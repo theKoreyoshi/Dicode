@@ -12,8 +12,19 @@
 ```powershell
 npm install
 npm run typecheck
+npm run lint
 npm test
 ```
+
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run typecheck` | TypeScript type check (sandbox-safe) |
+| `npm run lint` | ESLint |
+| `npm test` | Unit tests (43) |
+| `npm run test:codex` | Real App Server integration test |
+| `npm run verify:app-server` | Phase 1 raw handshake probe |
 
 ## Workspaces
 
@@ -43,6 +54,16 @@ npm test
 
 In a normal (non-sandboxed) development checkout neither command needs special
 handling.
+
+`npm run test:codex` always requires host filesystem/network access: it spawns
+the real App Server, creates a thread, and sends a real task to the model
+provider proxy.
+
+## Codex Adapter
+
+The adapter is the bottom communication layer. See
+[docs/adapter-usage.md](adapter-usage.md) for a minimal usage example and
+[docs/protocol.md](protocol.md) for the verified protocol.
 
 ## Regenerating protocol artifacts
 

@@ -152,6 +152,30 @@ Agent requests an operation
 
 Dicode honors the server's sandbox/permission policy and never auto-approves.
 
+### Verified decision shapes
+
+| Approval method | Approve | Deny |
+| --- | --- | --- |
+| `item/commandExecution/requestApproval` | `{ decision: "accept" }` | `{ decision: "decline" }` |
+| `item/fileChange/requestApproval` | `{ decision: "accept" }` | `{ decision: "decline" }` |
+| `item/permissions/requestApproval` | `{ permissions, scope: "turn" }` | empty/null profile |
+| `item/tool/requestUserInput` | `{ answers: { id: { answers: [...] } } }` | n/a |
+
+### Verified turn/steer params
+
+```jsonc
+// turn/start
+{ "threadId": "...", "input": [{ "type": "text", "text": "..." }] }
+
+// turn/steer (expectedTurnId is a required precondition)
+{ "threadId": "...", "expectedTurnId": "...", "input": [{ "type": "text", "text": "..." }] }
+
+// turn/interrupt
+{ "threadId": "...", "turnId": "..." }
+```
+
+`TurnStatus` is `completed | interrupted | failed | inProgress`.
+
 ## Phase 1 verification result
 
 The following were executed against a live App Server and all succeeded:

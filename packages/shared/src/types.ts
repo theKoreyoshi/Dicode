@@ -9,22 +9,28 @@ export type DicodeEventType =
   | "turn.started"
   | "turn.completed"
   | "turn.interrupted"
-  | "agent.message.delta"
+  | "turn.failed"
   | "item.started"
   | "item.completed"
-  | "tool.call"
-  | "tool.result"
+  | "agent.message.delta"
+  | "reasoning.delta"
+  | "tool.started"
+  | "tool.completed"
+  | "shell.started"
   | "shell.output"
-  | "file.read"
+  | "shell.completed"
   | "file.changed"
-  | "command.executed"
   | "approval.requested"
   | "approval.resolved"
   | "diff.updated"
+  | "token.usage"
   | "agent.error"
-  | "connection.closed";
+  | "connection.status"
+  | "unknown";
 
 export interface DicodeEvent {
+  /** Monotonic identifier assigned by the adapter, unique within a run. */
+  id: string;
   type: DicodeEventType;
   sessionId?: string;
   turnId?: string;
