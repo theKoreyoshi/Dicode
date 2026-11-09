@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { RuntimeNotFoundError } from "../errors/adapter-errors.js";
+import { getBundledRuntimeDir } from "@dicode/shared";
 
 export interface ProcessConfig {
   /** Absolute path to codex.exe. */
@@ -105,6 +106,5 @@ function findOnPath(name: string): string | null {
 }
 
 function defaultBundledRuntimeDir(): string {
-  const execDir = dirname(process.execPath);
-  return join(execDir, "..", "runtime", "codex");
+  return getBundledRuntimeDir();
 }

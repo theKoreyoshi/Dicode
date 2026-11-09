@@ -2,12 +2,20 @@
 // Bundles the CLI + TUI + Core + Adapter into one CJS file, then injects it
 // into a copy of the Node binary.
 import { build } from "esbuild";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+
+const NODE_VERSION = execFileSync(NODE_EXE, ["--version"], { encoding: "utf8" }).trim();
+const ESBUILD_VERSION = JSON.parse(readFileSync(require.resolve("esbuild/package.json"), "utf8")).version;
+const POSTJECT_VERSION = JSON.parse(readFileSync(require.resolve("postject/package.json"), "utf8")).version;
+const DICODE_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+
+console.log(`Node: ${NODE_VERSION} | esbuild: ${ESBUILD_VERSION} | postject: ${POSTJECT_VERSION} | Dicode: ${DICODE_VERSION}`);
 
 const ROOT = process.cwd();
 const DIST = join(ROOT, "dist", "sea");
@@ -75,3 +83,18 @@ execFileSync(process.execPath, [
 
 console.log("DONE:", OUT_EXE);
 console.log("size:", existsSync(OUT_EXE) ? `${(readFileSync(OUT_EXE).length / 1e6).toFixed(1)}MB` : "missing");
+
+const sha256 = createHash("sha256").update(readFileSync(OUT_EXE)).digest("hex");
+const buildInfo = {
+  dicodeVersion: DICODE_VERSION,
+  nodeVersion: NODE_VERSION,
+  esbuildVersion: ESBUILD_VERSION,
+  postjectVersion: POSTJECT_VERSION,
+  exePath: OUT_EXE,
+  exeSizeBytes: statSync(OUT_EXE).size,
+  exeSha256: sha256,
+  builtAt: new Date().toISOString(),
+};
+writeFileSync(join(ROOT, "release", "build-info.json"), `${JSON.stringify(buildInfo, null, 2)}\n`, "utf8");
+console.log("SHA-256:", sha256);
+console.log("build-info.json written.");

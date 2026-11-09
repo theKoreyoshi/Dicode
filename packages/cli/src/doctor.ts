@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { join } from "node:path";
 import { CodexClient } from "@dicode/codex-adapter";
 import { PRODUCT_VERSION } from "@dicode/shared";
+import { getBundledRuntimeDir, getDataDir } from "@dicode/shared";
 import { Database } from "@dicode/core";
 
 export interface DoctorCheck {
@@ -74,10 +74,9 @@ export function checkBundledRuntime(dir = defaultRuntimeDir()): DoctorCheck {
 }
 
 export function checkUserData(): DoctorCheck {
-  const base = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-  const dataDir = join(base, "Dicode", "data");
+  const dataDir = getDataDir();
   try {
-    return { name: "User Data Directory", ok: existsSync(dataDir) || existsSync(dirname(dataDir)), detail: dataDir };
+    return { name: "User Data Directory", ok: existsSync(dataDir), detail: dataDir };
   } catch {
     return { name: "User Data Directory", ok: false, detail: dataDir };
   }
@@ -97,8 +96,7 @@ export async function checkAppServer(timeoutMs = 15_000): Promise<DoctorCheck> {
 }
 
 export function checkSqlite(): DoctorCheck {
-  const base = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-  const dbPath = join(base, "Dicode", "data", "dicode.db");
+  const dbPath = join(getDataDir(), "dicode.db");
   try {
     const db = new Database({ path: dbPath });
     db.close();
@@ -139,5 +137,5 @@ export function sha256File(file: string): string {
 }
 
 function defaultRuntimeDir(): string {
-  return join(dirname(process.execPath), "..", "runtime", "codex");
+  return getBundledRuntimeDir();
 }
