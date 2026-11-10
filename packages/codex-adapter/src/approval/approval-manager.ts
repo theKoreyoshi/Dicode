@@ -61,18 +61,18 @@ export class CodexApprovalManager implements ApprovalManager {
 
     switch (decision.kind) {
       case "approve":
-        result = approvalResult(request.type);
+        result = approvalResult(request);
         break;
       case "deny":
-        result = denialResult(request.type);
+        result = denialResult(request);
         break;
       case "custom":
         result = decision.result;
         break;
     }
 
-    this.pending.delete(String(request.id));
     this.respondFn(request.id, result);
+    this.pending.delete(String(request.id));
   }
 
   async reject(requestId: string): Promise<void> {
@@ -116,13 +116,24 @@ function approvalTypeFor(method: string): ApprovalType | null {
   }
 }
 
-function approvalResult(type: ApprovalType): unknown {
-  switch (type) {
-    case "command":
+function approvalResult(request: ApprovalRequest): unknown {
+  switch (request.type) {
+    case "command": {
+      const choices = (request.params as { availableDecisions?: unknown[] })?.availableDecisions;
+      if (choices?.length && !choices.includes("accept")) {
+        throw new ApprovalError("This request does not offer a one-time approval");
+      }
+      return { decision: "accept" };
+    }
     case "fileChange":
       return { decision: "accept" };
-    case "permissions":
-      return { permissions: {}, scope: "turn" };
+    case "permissions": {
+      const permissions = (request.params as { permissions?: { fileSystem?: unknown; network?: unknown } })?.permissions;
+      return { permissions: {
+        ...(permissions?.fileSystem != null && { fileSystem: permissions.fileSystem }),
+        ...(permissions?.network != null && { network: permissions.network }),
+      }, scope: "turn" };
+    }
     case "toolInput":
       return { answers: {} };
     default:
@@ -130,13 +141,20 @@ function approvalResult(type: ApprovalType): unknown {
   }
 }
 
-function denialResult(type: ApprovalType): unknown {
-  switch (type) {
-    case "command":
+function denialResult(request: ApprovalRequest): unknown {
+  switch (request.type) {
+    case "command": {
+      const choices = (request.params as { availableDecisions?: unknown[] })?.availableDecisions;
+      return { decision: choices?.includes("cancel") && !choices.includes("decline") ? "cancel" : "decline" };
+    }
     case "fileChange":
       return { decision: "decline" };
     case "permissions":
-      return { permissions: { fileSystem: null, network: null }, scope: "turn" };
+      return { permissions: {}, scope: "turn" };
+    case "toolInput":
+      return { answers: {} };
+    case "elicitation":
+      return { action: "decline", content: null, _meta: null };
     default:
       return {};
   }

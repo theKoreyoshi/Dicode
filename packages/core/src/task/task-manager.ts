@@ -10,6 +10,8 @@ import { deriveTitle } from "../session/session-manager.js";
 import type { MessageInput, TaskInfo } from "./task-types.js";
 
 export class TaskManager {
+  private readonly pendingInterrupts = new Set<string>();
+
   constructor(
     private readonly adapter: AgentAdapter,
     private readonly sessionRepo: SessionRepository,
@@ -35,6 +37,7 @@ export class TaskManager {
       startedAt: null,
       completedAt: null,
       durationMs: null,
+      ownerPid: process.pid,
     };
     this.taskRepo.insert(task);
 
@@ -62,37 +65,69 @@ export class TaskManager {
       }
     });
     this.eventManager.emit("task.created", { sessionId, taskId: task.id, payload: task });
-
-    // Reflect the auto-title back to storage if it was empty.
-    const freshSession = this.sessionRepo.get(sessionId);
-    if (freshSession && !freshSession.title) {
-      freshSession.title = deriveTitle(input.text);
-      this.sessionRepo.update(freshSession);
-    }
+    this.eventManager.emit("message.submitted", { sessionId, taskId: task.id, payload: userMessage });
 
     try {
       const turn = await this.adapter.startTurn(session.codexThreadId, {
         text: input.text,
         model: input.model,
         effort: input.effort,
+        mode: input.mode,
       });
-      task.turnId = turn.id;
-      task.status = "running";
-      task.startedAt = nowMs();
-      this.taskRepo.update(task);
       this.eventManager.registerTurn(turn.id, sessionId, task.id);
-      this.stateManager.update((s) => {
-        if (s.tasks.tasks[task.id]) s.tasks.tasks[task.id] = task;
-      });
-      this.eventManager.emit("task.started", { sessionId, taskId: task.id, turnId: turn.id, payload: task });
-      return task;
+      const current = this.taskRepo.get(task.id) ?? task;
+      if (current.status === "queued") {
+        current.turnId = turn.id;
+        current.status = "running";
+        current.startedAt = nowMs();
+        this.taskRepo.update(current);
+        this.stateManager.update((s) => {
+          s.tasks.tasks[task.id] = current;
+        });
+        this.eventManager.emit("task.started", { sessionId, taskId: task.id, turnId: turn.id, payload: current });
+        if (turn.status !== "inProgress") this.eventManager.endTask(sessionId, task.id, turn.status, turn.error ?? undefined);
+      }
+      const freshSession = this.sessionRepo.get(sessionId);
+      if (freshSession) {
+        freshSession.title ||= deriveTitle(input.text);
+        freshSession.lastActivityAt = Math.max(now, freshSession.lastActivityAt);
+        if (this.stateManager.getState().tasks.runningBySession[sessionId] === task.id) {
+          freshSession.status = this.stateManager.getState().sessions.sessions[sessionId]?.status ?? "running";
+        }
+        freshSession.model = input.model ?? freshSession.model;
+        this.sessionRepo.update(freshSession);
+        this.stateManager.update((s) => {
+          const sess = s.sessions.sessions[sessionId];
+          if (sess) {
+            sess.model = freshSession.model;
+            sess.title = freshSession.title;
+            sess.lastActivityAt = freshSession.lastActivityAt;
+          }
+        });
+        this.eventManager.emit("session.updated", { sessionId, payload: freshSession });
+      }
+      if (this.pendingInterrupts.delete(task.id) && this.getRunningTask(sessionId)?.id === task.id) {
+        try {
+          await this.adapter.interruptTurn(session.codexThreadId);
+        } catch (error) {
+          if (this.getRunningTask(sessionId)?.id === task.id) {
+            this.eventManager.emit("core.error", { sessionId, taskId: task.id, payload: { message: (error as Error).message } });
+          }
+        }
+      }
+      return this.taskRepo.get(task.id) ?? current;
     } catch (error) {
+      this.pendingInterrupts.delete(task.id);
+      const current = this.taskRepo.get(task.id);
+      if (current?.turnId) return current;
+      this.messageRepo.delete(userMessage.id);
       task.status = "failed";
       task.error = (error as Error).message;
       task.completedAt = nowMs();
       this.taskRepo.update(task);
       this.stateManager.update((s) => {
         if (s.tasks.tasks[task.id]) s.tasks.tasks[task.id] = task;
+        if (s.sessions.sessions[sessionId]) s.sessions.sessions[sessionId].status = "failed";
         delete s.tasks.runningBySession[sessionId];
       });
       this.eventManager.emit("task.failed", { sessionId, taskId: task.id, payload: task });
@@ -102,12 +137,34 @@ export class TaskManager {
 
   async steerTask(sessionId: string, input: MessageInput): Promise<void> {
     const session = this.requireSession(sessionId);
+    const task = this.getRunningTask(sessionId);
+    const createdAt = nowMs();
     await this.adapter.steerTurn(session.codexThreadId, { text: input.text });
+    const message: MessageRecord = {
+      id: createId("msg"),
+      sessionId,
+      taskId: task?.id ?? null,
+      turnId: task?.turnId ?? null,
+      itemId: null,
+      role: "user",
+      content: input.text,
+      sequence: this.nextMessageSequence(sessionId),
+      createdAt,
+    };
+    this.messageRepo.insert(message);
+    this.eventManager.emit("message.submitted", { sessionId, taskId: task?.id, turnId: task?.turnId ?? undefined, payload: message });
     this.eventManager.emit("task.updated", { sessionId, payload: { input: input.text } });
   }
 
   async interruptTask(sessionId: string): Promise<void> {
     const session = this.requireSession(sessionId);
+    const taskId = this.stateManager.getState().tasks.runningBySession[sessionId];
+    const task = taskId ? this.taskRepo.get(taskId) : null;
+    if (task?.status === "queued" && !task.turnId) {
+      this.pendingInterrupts.add(task.id);
+      return;
+    }
+    if (task) this.pendingInterrupts.delete(task.id);
     await this.adapter.interruptTurn(session.codexThreadId);
   }
 
@@ -121,6 +178,22 @@ export class TaskManager {
 
   getRunningTask(sessionId: string): TaskInfo | null {
     return this.taskRepo.getRunningBySession(sessionId);
+  }
+
+  recoverOrphanedTasks(): Set<string> {
+    const recovered = new Set<string>();
+    for (const task of this.taskRepo.listActive()) {
+      if (task.ownerPid && isProcessAlive(task.ownerPid)) continue;
+      this.eventManager.endTask(task.sessionId, task.id, "interrupted");
+      recovered.add(task.sessionId);
+    }
+    return recovered;
+  }
+
+  endOwnedTasks(status: "failed" | "interrupted", reason?: string): Set<string> {
+    const sessions = Object.entries(this.stateManager.getState().tasks.runningBySession);
+    for (const [sessionId, taskId] of sessions) this.eventManager.endTask(sessionId, taskId, status, reason);
+    return new Set(sessions.map(([sessionId]) => sessionId));
   }
 
   private assertNoRunningTask(sessionId: string): void {
@@ -138,5 +211,14 @@ export class TaskManager {
 
   private nextMessageSequence(sessionId: string): number {
     return this.messageRepo.maxSequence(sessionId) + 1;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }

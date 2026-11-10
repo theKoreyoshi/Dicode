@@ -1,4 +1,26 @@
-# Test Report — Phases 2-3
+# Test Report
+
+## OpenCode-style TUI and Windows build · 2026-11-10
+
+| Check | Result |
+| --- | --- |
+| TypeScript and ESLint | Passed |
+| Vitest | 121 passed across 24 files |
+| Codex Adapter against official Codex 0.167.0 | 6 passed |
+| Core against official Codex 0.167.0 | 6 passed |
+| Packaged CLI in Windows ConPTY | Interactive session startup, live output, Unicode and multiline input, file completion, command and session pickers, agent selection, resize, Ctrl+C immediately after turn startup, exit, and resume |
+| File edit and turn diff | The packaged CLI created the expected fixture in a disposable Git repository and showed the new file in `/diff` with the complete Codex Desktop runtime |
+| Real approval protocol | A temporary thread with the complete runtime requested command approval. The test declined the request and the turn completed |
+| Windows x64 build | Node SEA and Inno Setup builds passed. Portable extraction and external-runtime diagnostics passed |
+
+The isolated terminal tests cover first submission, retry after an error,
+transcript pagination, and explicit approval input. The live approval check
+exercised the App Server request/response separately from the TUI modal.
+The file edit and approval used Codex Desktop Runtime `0.166.0-alpha.6`;
+handshake and integration tests used the official `0.167.0` binary.
+Installation and uninstall on a clean Windows VM remain a release check.
+
+## Historical report · Phases 2–3
 
 Generated 2026-11-09. Codex Runtime `0.167.0-alpha.3.2`.
 

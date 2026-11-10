@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { marked, type Token } from "marked";
 import { highlight } from "cli-highlight";
 import hljs from "highlight.js";
 
@@ -37,7 +37,7 @@ export function parseMarkdown(markdown: string): MdBlock[] {
         blocks.push({
           type: "list",
           ordered: token.ordered,
-          items: (token.items as Array<{ text?: string; raw?: string }>).map((item) => inlineText(item)),
+          items: token.items.map((item: Token) => inlineText(item)),
         });
         break;
       case "blockquote":
@@ -102,23 +102,16 @@ const HLJS_COLORS: Record<string, string> = {
 
 function parseHighlightHtml(html: string): HighlightSegment[] {
   const segments: HighlightSegment[] = [];
-  const regex = /<span class="([^"]*)">([\s\S]*?)<\/span>/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(html)) !== null) {
-    if (match.index > lastIndex) {
-      const plain = decode(html.slice(lastIndex, match.index));
-      if (plain) segments.push({ text: plain });
+  const colors: Array<string | undefined> = [];
+  for (const [part, classes] of html.matchAll(/<span class="([^"]*)">|<\/span>|[^<]+/gu)) {
+    if (classes) {
+      const name = classes.split(/\s+/u).find((entry) => entry.startsWith("hljs-"))?.slice(5);
+      colors.push((name && HLJS_COLORS[name]) || colors.at(-1));
+    } else if (part === "</span>") {
+      colors.pop();
+    } else {
+      segments.push({ text: decode(part), color: colors.at(-1) });
     }
-    const classes = match[1].split(/\s+/);
-    const hljsClass = classes.find((c) => c.startsWith("hljs-"))?.slice(5);
-    const color = hljsClass ? HLJS_COLORS[hljsClass] : undefined;
-    segments.push({ text: decode(match[2]), color });
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < html.length) {
-    const tail = decode(html.slice(lastIndex));
-    if (tail) segments.push({ text: tail });
   }
   return segments;
 }
@@ -149,17 +142,8 @@ export function markdownToPlainText(markdown: string): string {
     .join("\n");
 }
 
-function inlineText(token: { text?: string; raw?: string; tokens?: unknown }): string {
-  return stripInlineMarkdown(token.text ?? token.raw ?? "");
-}
-
-function stripInlineMarkdown(text: string): string {
-  return text
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/_([^_]+)_/g, "$1");
+function inlineText(token: Token): string {
+  if (token.type === "br") return "\n";
+  if ("tokens" in token && Array.isArray(token.tokens)) return token.tokens.map(inlineText).join("");
+  return "text" in token && typeof token.text === "string" ? token.text : token.raw;
 }

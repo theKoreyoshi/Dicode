@@ -39,6 +39,7 @@ export interface TaskRecord {
   startedAt: number | null;
   completedAt: number | null;
   durationMs: number | null;
+  ownerPid?: number | null;
 }
 
 export type MessageRole = "user" | "assistant";

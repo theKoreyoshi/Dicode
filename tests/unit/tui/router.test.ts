@@ -19,7 +19,8 @@ describe("parseArgs", () => {
     expect(parseArgs(["--resume"]).resume).toBe(true);
   });
 
-  it("parses --doctor", () => {
+  it("parses doctor as a command or flag", () => {
+    expect(parseArgs(["doctor"]).doctor).toBe(true);
     expect(parseArgs(["--doctor"]).doctor).toBe(true);
   });
 

@@ -122,4 +122,12 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_tool_executions_turn ON tool_executions(turn_id);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE tasks ADD COLUMN owner_pid INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_sessions_codex_thread ON sessions(codex_thread_id);
+      CREATE INDEX IF NOT EXISTS idx_events_session_type ON events(session_id, type, created_at DESC);
+    `,
+  },
 ];

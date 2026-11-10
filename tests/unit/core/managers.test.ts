@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@dicode/codex-adapter";
 import {
   ApprovalManager,
@@ -80,6 +80,58 @@ describe("TaskManager", () => {
     await manager.sendMessage("s1", { text: "first" });
     await manager.steerTask("s1", { text: "more" });
     await manager.interruptTask("s1");
+    expect(h.repos.message.listBySession("s1").map((message) => message.content)).toEqual(["first", "more"]);
+  });
+
+  it("does not reopen a turn whose notifications complete before the start response", async () => {
+    const h = createHarness();
+    insertSession(h);
+    const manager = new TaskManager(h.adapter, h.repos.session, h.repos.task, h.repos.message, h.state, h.events);
+    const event = { id: "evt", sessionId: "thread-1", turnId: "turn-1", timestamp: Date.now() };
+    h.adapter.startTurn = async () => {
+      h.events.handleAdapterEvent({ ...event, type: "turn.started", payload: {} });
+      h.events.handleAdapterEvent({ ...event, type: "shell.started", itemId: "tool-1", payload: { item: { type: "commandExecution", command: "npm test" } } });
+      h.events.handleAdapterEvent({ ...event, type: "shell.completed", itemId: "tool-1", payload: { item: { type: "commandExecution", status: "failed", aggregatedOutput: "test failure" } } });
+      h.events.handleAdapterEvent({ ...event, type: "agent.message.delta", itemId: "assistant-1", payload: { delta: "partial" } });
+      h.events.handleAdapterEvent({ ...event, type: "turn.completed", payload: { turn: { status: "interrupted" } } });
+      return { id: "turn-1", status: "inProgress" };
+    };
+    const task = await manager.sendMessage("s1", { text: "run tests" });
+    expect(task.status).toBe("interrupted");
+    expect(manager.getRunningTask("s1")).toBeNull();
+    expect(h.repos.message.listBySession("s1").map((message) => message.content)).toEqual(["run tests", "partial"]);
+    expect(h.repos.tool.listBySession("s1")).toMatchObject([{ toolName: "npm test", status: "failed", output: "test failure" }]);
+  });
+
+  it("delivers an interrupt requested while the turn is still starting", async () => {
+    const h = createHarness();
+    insertSession(h);
+    const manager = new TaskManager(h.adapter, h.repos.session, h.repos.task, h.repos.message, h.state, h.events);
+    type Turn = Awaited<ReturnType<typeof h.adapter.startTurn>>;
+    let resolveTurn!: (turn: Turn) => void;
+    const turn = new Promise<Turn>((resolve) => { resolveTurn = resolve; });
+    h.adapter.startTurn = () => turn;
+    h.adapter.interruptTurn = vi.fn().mockResolvedValue(undefined);
+    const pending = manager.sendMessage("s1", { text: "start" });
+    await manager.interruptTask("s1");
+    expect(h.adapter.interruptTurn).not.toHaveBeenCalled();
+    resolveTurn({ id: "turn-1", status: "inProgress" });
+    await pending;
+    expect(h.adapter.interruptTurn).toHaveBeenCalledOnce();
+    expect(h.adapter.interruptTurn).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("recovers orphaned persisted tasks while preserving tasks owned by a live process", async () => {
+    const h = createHarness();
+    insertSession(h, "orphan");
+    insertSession(h, "live");
+    const manager = new TaskManager(h.adapter, h.repos.session, h.repos.task, h.repos.message, h.state, h.events);
+    const active = await manager.sendMessage("live", { text: "running" });
+    const orphan = { ...active, id: "orphan-task", sessionId: "orphan", turnId: "orphan-turn", ownerPid: null };
+    h.repos.task.insert(orphan);
+    expect(manager.recoverOrphanedTasks()).toEqual(new Set(["orphan"]));
+    expect(manager.getTask(orphan.id)?.status).toBe("interrupted");
+    expect(manager.getTask(active.id)?.status).toBe("running");
   });
 });
 

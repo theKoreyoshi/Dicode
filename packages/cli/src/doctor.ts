@@ -26,11 +26,16 @@ export async function runDoctor(): Promise<DoctorCheck[]> {
   checks.push(checkEnvironment());
   checks.push(checkDicodeVersion());
 
-  const runtime = checkBundledRuntime();
-  checks.push(runtime);
+  const runtimeDir = defaultRuntimeDir();
+  const bundledRuntime = checkBundledRuntime(runtimeDir);
+  const appServer = await checkAppServer();
+  checks.push(!existsSync(join(runtimeDir, "codex.exe")) && appServer.ok
+    ? { name: "Codex Runtime", ok: true, detail: "Using an external Codex runtime." }
+    : bundledRuntime);
+  const sqlite = checkSqlite();
   checks.push(checkUserData());
-  checks.push(await checkAppServer());
-  checks.push(checkSqlite());
+  checks.push(appServer);
+  checks.push(sqlite);
   return checks;
 }
 
@@ -62,7 +67,11 @@ export function checkDicodeVersion(): DoctorCheck {
 export function checkBundledRuntime(dir = defaultRuntimeDir()): DoctorCheck {
   const codex = join(dir, "codex.exe");
   if (!existsSync(codex)) {
-    return { name: "Bundled Codex Runtime", ok: false, detail: `Missing ${codex}` };
+    return {
+      name: "Bundled Codex Runtime",
+      ok: false,
+      detail: `Missing ${codex}. Install Codex or set DICODE_CODEX_EXE to the full path of codex.exe.`,
+    };
   }
   const manifest = readManifest(join(dir, "version.json"));
   const integrity = verifyIntegrity(codex, manifest?.files?.["codex.exe"]);

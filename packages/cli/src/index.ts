@@ -41,7 +41,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
-  render(createElement(App, { cwd: options.cwd, resume: options.resume }));
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stderr.write("Dicode requires an interactive terminal. Run dicode in a terminal or use dicode --help.\n");
+    process.exitCode = 1;
+    return;
+  }
+
+  render(createElement(App, { cwd: options.cwd, resume: options.resume }), { exitOnCtrlC: false });
 }
 
 export { parseArgs, HELP_TEXT };

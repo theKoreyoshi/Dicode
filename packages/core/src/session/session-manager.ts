@@ -72,10 +72,7 @@ export class SessionManager {
   }
 
   findByThreadId(codexThreadId: string): SessionInfo | null {
-    for (const session of this.sessionRepo.list()) {
-      if (session.codexThreadId === codexThreadId) return session;
-    }
-    return null;
+    return this.sessionRepo.getByThreadId(codexThreadId);
   }
 
   switchTo(sessionId: string): void {

@@ -90,8 +90,8 @@ function itemEvent(
     specificType = phase === "started" ? "shell.started" : "shell.completed";
   } else if (itemType && TOOL_ITEM_TYPES.has(itemType)) {
     specificType = phase === "started" ? "tool.started" : "tool.completed";
-  } else if (itemType && FILE_ITEM_TYPES.has(itemType) && phase === "completed") {
-    specificType = "file.changed";
+  } else if (itemType && FILE_ITEM_TYPES.has(itemType)) {
+    specificType = phase === "started" ? "tool.started" : "file.changed";
   }
 
   return {

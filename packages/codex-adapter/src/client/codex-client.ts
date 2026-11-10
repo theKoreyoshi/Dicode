@@ -4,7 +4,7 @@ import { AdapterNotReadyError } from "../errors/adapter-errors.js";
 import { EventBus, type DicodeEventListener } from "../events/event-listener.js";
 import { mapNotification } from "../events/event-mapper.js";
 import { Logger, logger } from "../logger.js";
-import { ServerNotificationMethods } from "../protocol.js";
+import { ClientMethods, ServerNotificationMethods } from "../protocol.js";
 import { ProcessManager, type ProcessManagerOptions } from "../process/process-manager.js";
 import { CodexThreadManager, type ThreadManager } from "../thread/thread-manager.js";
 import type { ForkThreadOptions, ListThreadOptions, ResumeThreadOptions, StartThreadOptions } from "../thread/thread-types.js";
@@ -65,7 +65,7 @@ export class CodexClient {
     );
     this.approvalManager = new CodexApprovalManager((id, result) => {
       this.requireRpc().respond(id, result);
-      this.eventBus.emit("approval.resolved", { payload: { id, result } });
+      this.eventBus.emit("approval.resolved", { payload: { id } });
     });
 
     this.approvalManager.onApproval((request) => {
@@ -150,8 +150,16 @@ export class CodexClient {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    const result = (await this.requireRpc().request("model/list", {})) as ModelListResult;
+    const result = (await this.requireRpc().request(ClientMethods.modelList, {})) as ModelListResult;
     return result.data ?? [];
+  }
+
+  async searchFiles(root: string, query: string, cancellationToken: string): Promise<string[]> {
+    this.requireReady();
+    const result = await this.requireRpc().request(ClientMethods.fuzzyFileSearch, {
+      roots: [root], query, cancellationToken,
+    }) as { files: Array<{ path: string; match_type: string }> };
+    return result.files.filter((file) => file.match_type === "file").slice(0, 8).map((file) => file.path);
   }
 
   createThread(options?: StartThreadOptions): Promise<import("../thread/thread-types.js").ThreadInfo> {
@@ -227,7 +235,7 @@ export class CodexClient {
     if (method === ServerNotificationMethods.turnStarted && turnId) {
       this.turnManager.noteTurnStarted(threadId, turnId);
     } else if (method === ServerNotificationMethods.turnCompleted) {
-      this.turnManager.noteTurnEnded(threadId);
+      this.turnManager.noteTurnEnded(threadId, turnId);
     }
   }
 

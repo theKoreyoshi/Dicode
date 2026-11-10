@@ -10,6 +10,7 @@ const alias = {
 };
 
 export default defineConfig({
+  esbuild: { jsx: "automatic" },
   resolve: { alias },
   plugins: [
     {

@@ -3,6 +3,7 @@ import {
   CodexApprovalManager,
   CodexThreadManager,
   CodexTurnManager,
+  RpcResponseError,
   TurnError,
 } from "@dicode/codex-adapter";
 
@@ -45,6 +46,23 @@ describe("CodexTurnManager", () => {
     expect(manager.getActiveTurnId("th1")).toBe("turn1");
   });
 
+  it("passes a real Codex collaboration mode and avoids restoring a turn that already ended", async () => {
+    const request = vi.fn(async () => {
+      manager.noteTurnStarted("th1", "turn1");
+      manager.noteTurnEnded("th1", "turn1");
+      return { turn: { id: "turn1", status: "inProgress" } };
+    });
+    const manager = new CodexTurnManager(request);
+    await manager.start("th1", { text: "plan a change", mode: "plan", model: "test-model", effort: "high" });
+    expect(request).toHaveBeenCalledWith("turn/start", expect.objectContaining({
+      collaborationMode: {
+        mode: "plan",
+        settings: { model: "test-model", reasoning_effort: "high", developer_instructions: null },
+      },
+    }));
+    expect(manager.getActiveTurnId("th1")).toBeUndefined();
+  });
+
   it("steers using the tracked expectedTurnId", async () => {
     const request = vi.fn().mockResolvedValue({ turn: { id: "turn1", status: "inProgress" } });
     const manager = new CodexTurnManager(request);
@@ -63,6 +81,34 @@ describe("CodexTurnManager", () => {
     await manager.start("th1", { text: "hello" });
     await manager.interrupt("th1");
     expect(request).toHaveBeenCalledWith("turn/interrupt", { threadId: "th1", turnId: "turn1" });
+  });
+
+  it("retries the same turn when Codex acknowledges start before the turn is interruptible", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({ turn: { id: "turn1", status: "inProgress" } })
+      .mockRejectedValueOnce(new RpcResponseError(-32600, "no active turn to interrupt"))
+      .mockResolvedValueOnce({});
+    const manager = new CodexTurnManager(request);
+    await manager.start("th1", { text: "hello" });
+    await manager.interrupt("th1");
+    const expected = ["turn/interrupt", { threadId: "th1", turnId: "turn1" }];
+    expect(request.mock.calls.slice(1)).toEqual([expected, expected]);
+  });
+
+  it("does not retry against a replacement turn or on an unrelated RPC error", async () => {
+    const request = vi.fn();
+    const manager = new CodexTurnManager(request);
+    manager.noteTurnStarted("th1", "turn1");
+    request.mockImplementationOnce(async () => {
+      manager.noteTurnEnded("th1", "turn1");
+      manager.noteTurnStarted("th1", "turn2");
+      throw new RpcResponseError(-32600, "no active turn to interrupt");
+    });
+    await manager.interrupt("th1");
+    expect(request).toHaveBeenCalledOnce();
+    request.mockRejectedValueOnce(new RpcResponseError(-32602, "invalid thread id"));
+    await expect(manager.interrupt("th1")).rejects.toThrow("invalid thread id");
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("throws when steering without an active turn", async () => {

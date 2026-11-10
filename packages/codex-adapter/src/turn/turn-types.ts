@@ -5,6 +5,7 @@ export interface TurnInput {
   text: string;
   model?: string;
   effort?: string;
+  mode?: "default" | "plan";
 }
 
 export interface TurnInfo {

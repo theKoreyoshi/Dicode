@@ -3,7 +3,7 @@ export { useDicodeApp } from "./app/useDicodeApp.js";
 export { COLORS } from "./theme/colors.js";
 export { SYMBOLS } from "./theme/symbols.js";
 export { DICODE_LOGO, DICODE_TAGLINE } from "./theme/logo.js";
-export { uiReducer, createInitialUiState, mergeStreamingDeltas, type UiState, type UiMessage, type UiAction } from "./state/ui-store.js";
+export { uiReducer, createInitialUiState, mergeStreamingDeltas, type UiState, type UiMessage, type UiTool, type UiAction } from "./state/ui-store.js";
 export { resolveKeyAction, type KeyAction, type KeyEvent } from "./utils/keyboard.js";
 export { formatRelativeTime, truncate, taskStatusLabel, approvalTitle, stripAnsi } from "./utils/format.js";
 export { parseMarkdown, markdownToPlainText, highlightCode, highlightLine, type MdBlock, type HighlightSegment } from "./utils/markdown.js";

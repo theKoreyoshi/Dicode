@@ -100,11 +100,15 @@ export class ApprovalManager {
     return this.approvalRepo.listBySession(sessionId);
   }
 
-  expirePending(): void {
+  expirePending(sessionIds: ReadonlySet<string>): void {
     for (const record of this.approvalRepo.listPending()) {
+      if (!sessionIds.has(record.sessionId)) continue;
       record.status = "expired";
       record.resolvedAt = nowMs();
       this.approvalRepo.update(record);
+      this.stateManager.update((s) => {
+        s.approvals.approvals[record.id] = record;
+      });
     }
   }
 

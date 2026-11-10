@@ -1,53 +1,74 @@
 import { describe, expect, it } from "vitest";
-import { createInitialUiState, mergeStreamingDeltas, uiReducer } from "@dicode/tui";
+import type { CoreEvent } from "@dicode/core";
+import { createInitialUiState, mergeStreamingDeltas, uiReducer, type UiState } from "@dicode/tui";
 
-function event(type: string, payload: unknown = {}) {
-  return { id: "e1", type, sequence: 1, timestamp: Date.now(), payload } as never;
+function receive(state: UiState, type: CoreEvent["type"], payload: unknown = {}, fields: Partial<CoreEvent> = {}) {
+  return uiReducer(state, {
+    type: "CORE_EVENT",
+    event: { id: "e1", type, sequence: 1, timestamp: 100, sessionId: "active", payload, ...fields },
+  });
 }
 
+const active = () => uiReducer(createInitialUiState(), { type: "SET_SESSION", sessionId: "active" });
+
 describe("uiReducer", () => {
-  it("adds a streaming message on task.started", () => {
-    const state = uiReducer(createInitialUiState(), { type: "CORE_EVENT", event: event("task.started", {}) });
+  it("sets a running status and waits for a real assistant item", () => {
+    const state = receive(active(), "task.started", {}, { taskId: "task-1" });
     expect(state.status).toBe("running");
-    expect(state.messages.some((m) => m.streaming)).toBe(true);
+    expect(state.currentTaskId).toBe("task-1");
+    expect(state.messages).toEqual([]);
   });
 
-  it("appends message deltas to the streaming message", () => {
-    let state = uiReducer(createInitialUiState(), { type: "CORE_EVENT", event: event("task.started") });
-    state = uiReducer(state, { type: "CORE_EVENT", event: event("message.delta", { delta: "hello " }) });
-    state = uiReducer(state, { type: "CORE_EVENT", event: event("message.delta", { delta: "world" }) });
-    const streaming = state.messages.find((m) => m.streaming);
-    expect(streaming?.content).toBe("hello world");
+  it("streams separate assistant items and reconciles each final payload", () => {
+    let state = receive(active(), "message.started", { item: { type: "agentMessage" } }, { itemId: "first" });
+    state = receive(state, "message.delta", { delta: "hello " }, { itemId: "first" });
+    state = receive(state, "message.delta", { delta: "world" }, { itemId: "first" });
+    state = receive(state, "message.completed", { item: { text: "Hello world!" } }, { itemId: "first" });
+    state = receive(state, "message.delta", { delta: "second item" }, { itemId: "second" });
+    expect(state.messages).toMatchObject([
+      { id: "first", content: "Hello world!", streaming: false },
+      { id: "second", content: "second item", streaming: true },
+    ]);
   });
 
-  it("finalizes streaming on task.completed", () => {
-    let state = uiReducer(createInitialUiState(), { type: "CORE_EVENT", event: event("task.started") });
-    state = uiReducer(state, { type: "CORE_EVENT", event: event("task.completed") });
+  it("finalizes partial messages on interruption", () => {
+    let state = receive(active(), "task.started", {}, { taskId: "task-1" });
+    state = receive(state, "message.delta", { delta: "partial" }, { itemId: "first", taskId: "task-1" });
+    state = receive(state, "task.interrupted", {}, { taskId: "task-1" });
     expect(state.status).toBe("ready");
-    expect(state.messages.every((m) => !m.streaming)).toBe(true);
+    expect(state.messages).toMatchObject([{ content: "partial", streaming: false }]);
   });
 
-  it("adds an approval and opens the modal", () => {
-    const state = uiReducer(createInitialUiState(), {
-      type: "CORE_EVENT",
-      event: event("approval.requested", { id: "a1", status: "pending" }),
-    });
+  it("keeps approvals scoped to the active session and until every request is resolved", () => {
+    let state = receive(active(), "task.started", {}, { taskId: "task-1" });
+    expect(receive(state, "approval.requested", { id: "other" }, { sessionId: "other" })).toBe(state);
+    state = receive(state, "approval.requested", { id: "a1", status: "pending" });
+    state = receive(state, "approval.requested", { id: "a2", status: "pending" });
     expect(state.status).toBe("waiting_approval");
-    expect(state.approvalModalOpen).toBe(true);
+    state = receive(state, "approval.resolved", { id: "a1", status: "approved" });
+    expect(state.status).toBe("waiting_approval");
     expect(state.pendingApprovals).toHaveLength(1);
+    state = receive(state, "approval.resolved", { id: "a2", status: "approved" });
+    expect(state.status).toBe("running");
+    expect(state.pendingApprovals).toHaveLength(0);
   });
 
-  it("removes a resolved approval", () => {
-    let state = uiReducer(createInitialUiState(), {
-      type: "CORE_EVENT",
-      event: event("approval.requested", { id: "a1", status: "pending" }),
-    });
-    state = uiReducer(state, {
-      type: "CORE_EVENT",
-      event: event("approval.resolved", { id: "a1", status: "approved" }),
-    });
-    expect(state.pendingApprovals).toHaveLength(0);
-    expect(state.approvalModalOpen).toBe(false);
+  it("keeps tool output attached to the matching item and applies the final result", () => {
+    let state = receive(active(), "tool.started", { item: { type: "commandExecution", command: "npm test" } }, { itemId: "shell" });
+    state = receive(state, "tool.output", { delta: "checking" }, { itemId: "shell", timestamp: 120 });
+    expect(state.tools[0]).toMatchObject({ label: "npm test", status: "running", output: "checking" });
+    state = receive(state, "tool.completed", { item: { aggregatedOutput: "failed output", exitCode: 1 } }, { itemId: "shell", timestamp: 150 });
+    expect(state.tools).toMatchObject([{ id: "shell", timestamp: 100, status: "failed", output: "failed output", exitCode: 1 }]);
+  });
+
+  it("drops failed submissions without a Codex turn and clears stale approvals on completion", () => {
+    let state = receive(active(), "task.created", {}, { taskId: "task-1" });
+    state = receive(state, "message.submitted", { id: "m1", role: "user", content: "retry", taskId: "task-1", createdAt: 100 });
+    state = receive(state, "approval.requested", { id: "approval-1" });
+    state = receive(state, "task.failed", { error: "request rejected" }, { taskId: "task-1" });
+    expect(state.error).toBe("request rejected");
+    expect(state.messages).toEqual([]);
+    expect(state.pendingApprovals).toEqual([]);
   });
 });
 

@@ -25,7 +25,7 @@ const child = spawn(CODEX_EXE, ["app-server", "--listen", "stdio://"], {
 
 let nextId = 1;
 const pending = new Map();
-let stderrBuf = "";
+let stderrSeen = false;
 
 const rl = readline.createInterface({ input: child.stdout });
 
@@ -36,13 +36,13 @@ rl.on("line", (raw) => {
   try {
     msg = JSON.parse(line);
   } catch {
-    log("NON-JSON on stdout (protocol pollution!):", JSON.stringify(line));
+    log("NON-JSON on protocol stdout");
     return;
   }
 
   // Server request (e.g. approval prompts / elicitation).
   if (msg.id !== undefined && msg.method !== undefined) {
-    log("SERVER-REQUEST method=", msg.method, "params=", JSON.stringify(msg.params));
+    log("SERVER-REQUEST method=", msg.method);
     return;
   }
   // Notification (event stream).
@@ -55,23 +55,20 @@ rl.on("line", (raw) => {
     const { resolve, reject, timer } = pending.get(msg.id);
     pending.delete(msg.id);
     clearTimeout(timer);
-    if (msg.error) reject(new Error(JSON.stringify(msg.error)));
+    if (msg.error) reject(new Error(`App Server error code ${msg.error.code ?? "unknown"}`));
     else resolve(msg.result);
     return;
   }
-  log("UNMATCHED message:", JSON.stringify(msg));
+  log("UNMATCHED protocol message");
 });
 
-child.stderr.on("data", (d) => {
-  stderrBuf += d.toString();
+child.stderr.on("data", () => {
+  stderrSeen = true;
 });
 
 child.on("exit", (code, signal) => {
   log("app-server exited code=", code, "signal=", signal);
-  if (stderrBuf.trim()) {
-    log("--- app-server stderr (first 2000 chars) ---");
-    log(stderrBuf.slice(0, 2000));
-  }
+  if (stderrSeen) log("App Server wrote diagnostic output to stderr.");
 });
 
 function send(obj) {
@@ -106,22 +103,22 @@ async function main() {
     clientInfo: { name: "dicode", version: "0.1.0" },
     capabilities: {},
   });
-  log("initialize OK =>", JSON.stringify(init));
+  log("initialize OK", init.platformFamily ?? "");
 
   notify("initialized");
   log("initialized sent");
 
   const account = await request("account/read", {});
-  log("account/read OK =>", JSON.stringify(account).slice(0, 1500));
+  log("account/read OK", account.account ? "signed in" : "no account returned");
 
   const models = await request("model/list", { limit: 10 });
-  log("model/list OK =>", JSON.stringify(models).slice(0, 1500));
+  log("model/list OK", models.data.length, "returned");
 
   const threads = await request("thread/list", { limit: 5 });
-  log("thread/list OK =>", JSON.stringify(threads).slice(0, 1000));
+  log("thread/list OK", threads.data.length, "returned");
 
-  const cfg = await request("config/read", {});
-  log("config/read OK =>", JSON.stringify(cfg).slice(0, 1000));
+  await request("config/read", {});
+  log("config/read OK");
 
   log("ALL HANDSHAKE CHECKS PASSED");
   child.stdin.end();

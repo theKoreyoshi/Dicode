@@ -1,4 +1,5 @@
-import { TurnError } from "../errors/adapter-errors.js";
+import { setTimeout as delay } from "node:timers/promises";
+import { RpcResponseError, TurnError } from "../errors/adapter-errors.js";
 import { ClientMethods } from "../protocol.js";
 import type {
   InterruptTurnParams,
@@ -15,11 +16,12 @@ export interface TurnManager {
   interrupt(threadId: string): Promise<void>;
   getActiveTurnId(threadId: string): string | undefined;
   noteTurnStarted(threadId: string, turnId: string): void;
-  noteTurnEnded(threadId: string): void;
+  noteTurnEnded(threadId: string, turnId?: string): void;
 }
 
 export class CodexTurnManager implements TurnManager {
   private readonly activeTurns = new Map<string, string>();
+  private readonly lastEndedTurns = new Map<string, string>();
 
   constructor(private readonly request: RequestFn) {}
 
@@ -28,11 +30,23 @@ export class CodexTurnManager implements TurnManager {
       threadId,
       input: [{ type: "text", text: input.text }],
     };
-    if (input.model) (params as { model?: string }).model = input.model;
-    if (input.effort) (params as { effort?: string }).effort = input.effort;
+    if (input.model) params.model = input.model;
+    if (input.effort) params.effort = input.effort;
+    if (input.mode && input.model) {
+      params.collaborationMode = {
+        mode: input.mode,
+        settings: {
+          model: input.model,
+          reasoning_effort: input.effort ?? null,
+          developer_instructions: null,
+        },
+      };
+    }
     const result = (await this.request(ClientMethods.turnStart, params)) as TurnResult;
     const turn = toTurnInfo(result.turn);
-    this.activeTurns.set(threadId, turn.id);
+    if (turn.status === "inProgress" && this.lastEndedTurns.get(threadId) !== turn.id && !this.activeTurns.has(threadId)) {
+      this.activeTurns.set(threadId, turn.id);
+    }
     return turn;
   }
 
@@ -49,7 +63,20 @@ export class CodexTurnManager implements TurnManager {
   async interrupt(threadId: string): Promise<void> {
     const turnId = this.requireActiveTurn(threadId, "interrupt");
     const params: InterruptTurnParams = { threadId, turnId };
-    await this.request(ClientMethods.turnInterrupt, params);
+    // The start RPC can return before the runtime has attached its active turn.
+    const retryDelays = [50, 100, 200, 400, 600, 1000, 1500];
+    for (let attempt = 0; this.activeTurns.get(threadId) === turnId; attempt++) {
+      try {
+        await this.request(ClientMethods.turnInterrupt, params);
+        return;
+      } catch (error) {
+        if (!(error instanceof RpcResponseError) || error.message !== "no active turn to interrupt") throw error;
+        if (this.activeTurns.get(threadId) !== turnId) return;
+        const retryDelay = retryDelays[attempt];
+        if (retryDelay === undefined) throw error;
+        await delay(retryDelay);
+      }
+    }
   }
 
   getActiveTurnId(threadId: string): string | undefined {
@@ -60,8 +87,9 @@ export class CodexTurnManager implements TurnManager {
     this.activeTurns.set(threadId, turnId);
   }
 
-  noteTurnEnded(threadId: string): void {
-    this.activeTurns.delete(threadId);
+  noteTurnEnded(threadId: string, turnId = this.activeTurns.get(threadId)): void {
+    if (turnId) this.lastEndedTurns.set(threadId, turnId);
+    if (this.activeTurns.get(threadId) === turnId) this.activeTurns.delete(threadId);
   }
 
   private requireActiveTurn(threadId: string, action: string): string {

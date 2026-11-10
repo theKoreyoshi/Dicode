@@ -105,6 +105,11 @@ export class SessionRepository {
     return row ? mapSession(row) : null;
   }
 
+  getByThreadId(threadId: string): SessionRecord | null {
+    const row = this.db.prepare("SELECT * FROM sessions WHERE codex_thread_id = ?").get(threadId) as Row | undefined;
+    return row ? mapSession(row) : null;
+  }
+
   list(options: { projectPath?: string; archived?: boolean } = {}): SessionRecord[] {
     const clauses: string[] = [];
     const params: Array<string | number | null> = [];
@@ -134,8 +139,8 @@ export class TaskRepository {
   insert(record: TaskRecord): void {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, session_id, turn_id, status, input_text, error, created_at, started_at, completed_at, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, session_id, turn_id, status, input_text, error, created_at, started_at, completed_at, duration_ms, owner_pid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -148,6 +153,7 @@ export class TaskRepository {
         record.startedAt,
         record.completedAt,
         record.durationMs,
+        record.ownerPid ?? null,
       );
   }
 
@@ -189,6 +195,11 @@ export class TaskRepository {
       .get(sessionId) as Row | undefined;
     return row ? mapTask(row) : null;
   }
+
+  listActive(): TaskRecord[] {
+    const rows = this.db.prepare("SELECT * FROM tasks WHERE status IN ('queued','running','waiting_approval')").all() as Row[];
+    return rows.map(mapTask);
+  }
 }
 
 export class MessageRepository {
@@ -216,10 +227,15 @@ export class MessageRepository {
   listBySession(sessionId: string, limit = 200): MessageRecord[] {
     const rows = this.db
       .prepare(
-        `SELECT * FROM messages WHERE session_id = ? ORDER BY sequence ASC LIMIT ?`,
+        `SELECT * FROM (SELECT * FROM messages WHERE session_id = ? ORDER BY sequence DESC, rowid DESC LIMIT ?)
+         ORDER BY sequence ASC, created_at ASC`,
       )
       .all(sessionId, limit) as Row[];
     return rows.map(mapMessage);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM messages WHERE id = ?").run(id);
   }
 
   maxSequence(sessionId: string): number {
@@ -257,6 +273,13 @@ export class EventRepository {
       .prepare(`SELECT * FROM events WHERE session_id = ? ORDER BY sequence ASC LIMIT ?`)
       .all(sessionId, limit) as Row[];
     return rows.map(mapEvent);
+  }
+
+  getLatestByType(sessionId: string, type: string): EventRecord | null {
+    const row = this.db
+      .prepare("SELECT * FROM events WHERE session_id = ? AND type = ? ORDER BY created_at DESC, rowid DESC LIMIT 1")
+      .get(sessionId, type) as Row | undefined;
+    return row ? mapEvent(row) : null;
   }
 }
 
@@ -348,9 +371,15 @@ export class ToolExecutionRepository {
 
   listBySession(sessionId: string, limit = 200): ToolExecutionRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM tool_executions WHERE session_id = ? ORDER BY created_at ASC LIMIT ?")
+      .prepare(`SELECT * FROM (SELECT * FROM tool_executions WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?)
+                ORDER BY created_at ASC`)
       .all(sessionId, limit) as Row[];
     return rows.map(mapToolExecution);
+  }
+
+  finishRunning(turnId: string, finishedAt: number): void {
+    this.db.prepare("UPDATE tool_executions SET status = 'failed', duration_ms = MAX(0, ? - created_at) WHERE turn_id = ? AND status = 'running'")
+      .run(finishedAt, turnId);
   }
 }
 
@@ -416,6 +445,7 @@ function mapTask(row: Row): TaskRecord {
     startedAt: nullableNum(row, "started_at"),
     completedAt: nullableNum(row, "completed_at"),
     durationMs: nullableNum(row, "duration_ms"),
+    ownerPid: nullableNum(row, "owner_pid"),
   };
 }
 

@@ -1,5 +1,5 @@
 // Builds dicode.exe via Node.js SEA (Single Executable Application).
-// Bundles the CLI + TUI + Core + Adapter into one CJS file, then injects it
+// Bundles the CLI + TUI + Core + Adapter into one ESM file, then injects it
 // into a copy of the Node binary.
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
@@ -59,7 +59,12 @@ await build({
 console.log("[2/4] writing sea-config.json...");
 writeFileSync(
   join(DIST, "sea-config.json"),
-  JSON.stringify({ main: join(DIST, "bundle.mjs"), output: join(DIST, "sea-prep.blob"), mainFormat: "module" }),
+  JSON.stringify({
+    main: join(DIST, "bundle.mjs"),
+    output: join(DIST, "sea-prep.blob"),
+    mainFormat: "module",
+    disableExperimentalSEAWarning: true,
+  }),
   "utf8",
 );
 

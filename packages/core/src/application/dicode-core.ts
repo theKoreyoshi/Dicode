@@ -125,24 +125,32 @@ export class DicodeCore {
     await this.adapter.start();
     this.capabilityManager.setFromAdapter(this.adapter.getCapabilities(), adapterMethodSet());
 
-    this.unsubscribeAdapterEvent = this.adapter.onEvent((event) => this.eventManager.handleAdapterEvent(event));
+    this.unsubscribeAdapterEvent = this.adapter.onEvent((event) => {
+      if (event.type === "turn.completed" && event.turnId) {
+        const ref = this.eventManager.getTurnRef(event.turnId);
+        if (ref) this.approvalManager.expirePending(new Set([ref.sessionId]));
+      }
+      this.eventManager.handleAdapterEvent(event);
+    });
     this.unsubscribeAdapterStatus = this.adapter.onStatusChange((status) => this.handleAdapterStatus(status));
     this.unsubscribeApproval = this.approvalManager.start();
 
+    this.approvalManager.expirePending(this.taskManager.recoverOrphanedTasks());
     this.restoreState();
     this.setStatus("ready");
+    this.handleAdapterStatus("ready");
   }
 
   async shutdown(): Promise<void> {
     if (this.status === "stopped" || this.status === "shutting_down") return;
     this.setStatus("shutting_down");
 
-    this.approvalManager.expirePending();
+    if (this.taskManager) this.approvalManager.expirePending(this.taskManager.endOwnedTasks("interrupted"));
     this.unsubscribeApproval?.();
     this.unsubscribeAdapterEvent?.();
     this.unsubscribeAdapterStatus?.();
     await this.adapter.stop();
-    this.database.close();
+    this.database?.close();
     this.setStatus("stopped");
   }
 
@@ -237,6 +245,10 @@ export class DicodeCore {
     return this.repos.message.listBySession(sessionId);
   }
 
+  getLatestSessionEvent(sessionId: string, type: CoreEvent["type"]) {
+    return this.repos.event.getLatestByType(sessionId, type);
+  }
+
   getToolExecutions(sessionId: string) {
     return this.repos.tool.listBySession(sessionId);
   }
@@ -287,6 +299,13 @@ export class DicodeCore {
     return this.adapter.listModels();
   }
 
+  async searchFiles(query: string): Promise<string[]> {
+    this.requireReady();
+    const project = this.getCurrentProject();
+    if (!project || !this.adapter.searchFiles) return [];
+    return this.adapter.searchFiles(project.path, query, `dicode-files:${project.id}`);
+  }
+
   private buildRepositories() {
     return {
       project: new ProjectRepository(this.database),
@@ -325,6 +344,10 @@ export class DicodeCore {
       s.runtime.connected = connected;
     });
     this.eventManager.emit(connected ? "runtime.connected" : "runtime.disconnected", { payload: { status } });
+    if (!connected) {
+      const sessions = this.taskManager.endOwnedTasks("failed", "Codex App Server disconnected");
+      this.approvalManager.expirePending(sessions);
+    }
   }
 
   private requireReady(): void {

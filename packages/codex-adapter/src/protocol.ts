@@ -32,6 +32,7 @@ export const ClientMethods = {
   turnInterrupt: "turn/interrupt",
   turnSettingsUpdate: "turn/settings/update",
   modelList: "model/list",
+  fuzzyFileSearch: "fuzzyFileSearch",
   accountRead: "account/read",
   configRead: "config/read",
   commandExec: "command/exec",

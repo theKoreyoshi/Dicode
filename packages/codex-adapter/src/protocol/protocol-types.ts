@@ -57,6 +57,14 @@ export interface StartTurnParams {
   input: TextUserInput[];
   model?: string;
   effort?: string;
+  collaborationMode?: {
+    mode: "default" | "plan";
+    settings: {
+      model: string;
+      reasoning_effort: string | null;
+      developer_instructions: null;
+    };
+  };
 }
 
 export interface SteerTurnParams {
@@ -81,6 +89,7 @@ export interface ModelInfo {
   displayName?: string;
   description?: string;
   hidden?: boolean;
+  isDefault?: boolean;
   defaultReasoningEffort?: string;
   supportedReasoningEfforts?: ModelReasoningEffort[];
 }

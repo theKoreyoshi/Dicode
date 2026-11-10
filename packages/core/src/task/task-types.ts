@@ -8,4 +8,5 @@ export interface MessageInput {
   text: string;
   model?: string;
   effort?: string;
+  mode?: "default" | "plan";
 }

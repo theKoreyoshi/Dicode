@@ -22,6 +22,14 @@ interface TurnRef {
   taskId: string;
 }
 
+interface AgentBuffer {
+  sessionId: string;
+  taskId: string | null;
+  turnId: string | null;
+  content: string;
+  startedAt: number;
+}
+
 /**
  * Converts adapter events into Core events, assigns per-session sequence
  * numbers, updates session/task state, accumulates agent message deltas, and
@@ -31,7 +39,7 @@ export class EventManager {
   private readonly deps: EventManagerDeps;
   private readonly listeners = new Set<CoreEventListener>();
   private readonly turnIndex = new Map<string, TurnRef>();
-  private readonly agentBuffers = new Map<string, string>();
+  private readonly agentBuffers = new Map<string, AgentBuffer>();
   private readonly sequences = new Map<string, number>();
 
   constructor(deps: EventManagerDeps) {
@@ -47,6 +55,12 @@ export class EventManager {
 
   registerTurn(turnId: string, sessionId: string, taskId: string): void {
     this.turnIndex.set(turnId, { sessionId, taskId });
+  }
+
+  endTask(sessionId: string, taskId: string, status: "completed" | "failed" | "interrupted", error?: string): void {
+    const type = `task.${status}` as const;
+    const task = this.markTaskEnded({ sessionId, taskId }, sessionId, type, { turn: { error: { message: error } } });
+    if (task) this.emit(type, { sessionId, taskId, turnId: task.turnId ?? undefined, payload: task });
   }
 
   /** Emit a Dicode-level event directly (session/task/project lifecycle). */
@@ -73,8 +87,12 @@ export class EventManager {
   }
 
   private mapAdapterEvent(adapterEvent: DicodeEvent): CoreEvent | null {
-    const ref = adapterEvent.turnId ? this.turnIndex.get(adapterEvent.turnId) : undefined;
-    const sessionId = ref?.sessionId ?? adapterEvent.sessionId;
+    const knownTurn = adapterEvent.turnId ? this.turnIndex.get(adapterEvent.turnId) : undefined;
+    const session = !knownTurn && adapterEvent.sessionId
+      ? this.deps.sessionRepo.getByThreadId(adapterEvent.sessionId) ?? this.deps.sessionRepo.get(adapterEvent.sessionId)
+      : null;
+    const ref = knownTurn ?? this.resolveTurn(adapterEvent, session?.id);
+    const sessionId = ref?.sessionId ?? session?.id;
     const taskId = ref?.taskId;
     const sequence = this.nextSequence(sessionId);
 
@@ -85,56 +103,67 @@ export class EventManager {
       turnId: adapterEvent.turnId,
       itemId: adapterEvent.itemId,
       sequence,
-      timestamp: nowMs(),
+      timestamp: adapterEvent.timestamp,
     };
 
     const payload = adapterEvent.payload as Record<string, unknown>;
 
     switch (adapterEvent.type) {
       case "turn.started":
-        this.markTaskRunning(ref, sessionId);
+        if (!ref || !adapterEvent.turnId || !this.markTaskRunning(ref, adapterEvent.turnId)) return null;
         return { ...base, type: "task.started", payload };
 
       case "turn.completed": {
         const status = (payload.turn as { status?: string } | undefined)?.status;
         const coreType = status === "interrupted" ? "task.interrupted" : status === "failed" ? "task.failed" : "task.completed";
-        this.markTaskEnded(ref, sessionId, coreType, status);
+        if (!this.markTaskEnded(ref, sessionId, coreType, payload)) return null;
         return { ...base, type: coreType, payload };
       }
 
       case "agent.message.delta":
-        this.appendAgentDelta(adapterEvent.itemId, payload.delta);
+        if (typeof payload.delta === "string") {
+          const buffer = this.getAgentBuffer(base);
+          if (buffer) buffer.content += payload.delta;
+        }
         return { ...base, type: "message.delta", payload };
 
       case "reasoning.delta":
-        return { ...base, type: "message.delta", payload };
+        return null;
 
       case "item.started":
-        if (isAgentItem(payload)) this.markMessageStarted(adapterEvent.itemId);
+        if (!isAgentItem(payload)) return null;
+        this.getAgentBuffer(base);
         return { ...base, type: "message.started", payload };
 
       case "item.completed":
-        if (isAgentItem(payload)) this.flushAgentMessage(sessionId, taskId, adapterEvent.turnId, adapterEvent.itemId);
+        if (!isAgentItem(payload)) return null;
+        this.getAgentBuffer(base);
+        if (base.itemId) this.flushAgentMessage(base.itemId, (payload.item as { text?: unknown }).text);
         return { ...base, type: "message.completed", payload };
 
       case "tool.started":
       case "shell.started":
-        this.recordToolStarted(adapterEvent, payload);
+        this.recordToolStarted(base, payload);
         return { ...base, type: "tool.started", payload };
 
       case "shell.output":
+        this.recordToolOutput(adapterEvent.itemId, payload.delta);
         return { ...base, type: "tool.output", payload };
 
       case "tool.completed":
       case "shell.completed":
-        this.recordToolCompleted(adapterEvent, payload);
+        this.recordToolCompleted(base, payload);
         return { ...base, type: "tool.completed", payload };
 
       case "file.changed":
+        if (payload.item) this.recordToolCompleted(base, payload);
         return { ...base, type: "file.changed", payload };
 
       case "diff.updated":
         return { ...base, type: "diff.updated", payload };
+
+      case "token.usage":
+        return { ...base, type: "token.usage", payload };
 
       case "approval.requested":
         // Approval records are owned by the Core ApprovalManager, which also
@@ -148,11 +177,22 @@ export class EventManager {
         return { ...base, type: "core.error", payload };
 
       case "connection.status":
-        return { ...base, type: "runtime.connected", payload };
+        return null;
 
       default:
         return null; // unknown/irrelevant adapter events are dropped, not treated as errors
     }
+  }
+
+  private resolveTurn(event: DicodeEvent, sessionId: string | undefined): TurnRef | undefined {
+    if (!event.turnId) return undefined;
+    if (!sessionId || event.type !== "turn.started") return undefined;
+    const taskId = this.deps.stateManager.getState().tasks.runningBySession[sessionId];
+    const task = taskId ? this.deps.taskRepo.get(taskId) : null;
+    if (task?.status !== "queued" || task.turnId) return undefined;
+    const ref = { sessionId, taskId: task.id };
+    this.turnIndex.set(event.turnId, ref);
+    return ref;
   }
 
   private nextSequence(sessionId?: string): number {
@@ -192,26 +232,32 @@ export class EventManager {
     }
   }
 
-  private appendAgentDelta(itemId: string | undefined, delta: unknown): void {
-    if (!itemId || typeof delta !== "string") return;
-    this.agentBuffers.set(itemId, (this.agentBuffers.get(itemId) ?? "") + delta);
+  private getAgentBuffer({ sessionId, taskId, turnId, itemId, timestamp }: Pick<CoreEvent, "sessionId" | "taskId" | "turnId" | "itemId" | "timestamp">): AgentBuffer | undefined {
+    if (!sessionId || !itemId) return;
+    let buffer = this.agentBuffers.get(itemId);
+    if (!buffer) {
+      buffer = { sessionId, taskId: taskId ?? null, turnId: turnId ?? null, content: "", startedAt: timestamp };
+      this.agentBuffers.set(itemId, buffer);
+    }
+    return buffer;
   }
 
-  private flushAgentMessage(sessionId: string | undefined, taskId: string | undefined, turnId: string | undefined, itemId: string | undefined): void {
-    if (!sessionId || !itemId) return;
-    const content = this.agentBuffers.get(itemId);
-    if (!content) return;
+  private flushAgentMessage(itemId: string, finalText?: unknown): void {
+    const buffer = this.agentBuffers.get(itemId);
+    if (!buffer) return;
     this.agentBuffers.delete(itemId);
+    const content = stringOr(finalText, buffer.content);
+    if (!content) return;
     const record: MessageRecord = {
       id: createId("msg"),
-      sessionId,
-      taskId: taskId ?? null,
-      turnId: turnId ?? null,
+      sessionId: buffer.sessionId,
+      taskId: buffer.taskId,
+      turnId: buffer.turnId,
       itemId,
       role: "assistant",
       content,
-      sequence: this.nextSequence(sessionId),
-      createdAt: nowMs(),
+      sequence: this.deps.messageRepo.maxSequence(buffer.sessionId) + 1,
+      createdAt: buffer.startedAt,
     };
     try {
       this.deps.messageRepo.insert(record);
@@ -220,40 +266,56 @@ export class EventManager {
     }
   }
 
-  private markMessageStarted(_itemId: string | undefined): void {
-    // No-op hook; keeps agent buffer lifecycle explicit.
-  }
-
-  private recordToolStarted(event: DicodeEvent, payload: Record<string, unknown>): void {
-    if (!event.sessionId) return;
+  private recordToolStarted(event: Pick<CoreEvent, "sessionId" | "turnId" | "itemId" | "taskId" | "timestamp">, payload: Record<string, unknown>): ToolExecutionRecord | null {
+    if (!event.sessionId || !event.itemId) return null;
     const item = payload.item as Record<string, unknown> | undefined;
+    const files = Array.isArray(item?.changes) ? item.changes as { path?: unknown }[] : [];
+    const firstPath = files[0]?.path;
+    const fileLabel = typeof firstPath === "string" ? firstPath + (files.length > 1 ? ` +${files.length - 1}` : "") : undefined;
+    const label = [item?.command, item?.tool, item?.query, item?.name, fileLabel].find((value) => typeof value === "string");
     const record: ToolExecutionRecord = {
       id: createId("tool"),
       sessionId: event.sessionId,
-      taskId: this.turnIndex.get(event.turnId ?? "")?.taskId ?? null,
+      taskId: event.taskId ?? null,
       turnId: event.turnId ?? null,
       itemId: event.itemId ?? null,
-      toolName: stringOr((item as Record<string, unknown> | undefined)?.name, stringOr(item?.type, "tool")),
+      toolName: stringOr(label, stringOr(item?.type, "tool")),
       toolType: stringOr(item?.type, "tool"),
       status: "running",
       input: (item?.arguments as Record<string, unknown>) ?? {},
       output: null,
       durationMs: null,
-      createdAt: nowMs(),
+      createdAt: event.timestamp,
     };
     try {
       this.deps.toolRepo.insert(record);
     } catch {
       // ignore
     }
+    return record;
   }
 
-  private recordToolCompleted(event: DicodeEvent, _payload: Record<string, unknown>): void {
-    if (!event.itemId) return;
-    const existing = this.deps.toolRepo.getByItemId(event.itemId);
+  private recordToolOutput(itemId: string | undefined, delta: unknown): void {
+    if (!itemId || typeof delta !== "string") return;
+    const existing = this.deps.toolRepo.getByItemId(itemId);
     if (!existing) return;
-    existing.status = "completed";
-    existing.durationMs = nowMs() - existing.createdAt;
+    existing.output = ((existing.output ?? "") + delta).slice(-16_000);
+    this.deps.toolRepo.update(existing);
+  }
+
+  private recordToolCompleted(event: Pick<CoreEvent, "sessionId" | "turnId" | "itemId" | "taskId" | "timestamp">, payload: Record<string, unknown>): void {
+    if (!event.itemId) return;
+    const existing = this.deps.toolRepo.getByItemId(event.itemId) ?? this.recordToolStarted(event, payload);
+    if (!existing) return;
+    const item = payload.item as Record<string, unknown> | undefined;
+    existing.status = item?.status === "failed" || item?.status === "declined" || item?.success === false || (typeof item?.exitCode === "number" && item.exitCode !== 0)
+      ? "failed"
+      : "completed";
+    const output = item?.aggregatedOutput ?? item?.result ?? item?.error ?? item?.changes;
+    if (output != null) {
+      existing.output = (typeof output === "string" ? output : JSON.stringify(output)).slice(-16_000);
+    }
+    existing.durationMs = typeof item?.durationMs === "number" ? item.durationMs : Math.max(0, event.timestamp - existing.createdAt);
     try {
       this.deps.toolRepo.update(existing);
     } catch {
@@ -261,18 +323,20 @@ export class EventManager {
     }
   }
 
-  private markTaskRunning(ref: TurnRef | undefined, sessionId: string | undefined): void {
-    if (!ref || !sessionId) return;
+  private markTaskRunning(ref: TurnRef, turnId: string): boolean {
     const task = this.deps.taskRepo.get(ref.taskId);
-    if (task && (task.status === "queued" || task.status === "waiting_approval")) {
+    if (task?.status === "queued") {
+      task.turnId = turnId;
       task.status = "running";
       task.startedAt = task.startedAt ?? nowMs();
       this.deps.taskRepo.update(task);
       this.deps.stateManager.update((s) => {
         if (s.tasks.tasks[task.id]) s.tasks.tasks[task.id] = task;
-        if (s.sessions.sessions[sessionId]) s.sessions.sessions[sessionId].status = "running";
+        if (s.sessions.sessions[ref.sessionId]) s.sessions.sessions[ref.sessionId].status = "running";
       });
+      return true;
     }
+    return false;
   }
 
   private markTaskWaiting(ref: TurnRef | undefined, sessionId: string | undefined): void {
@@ -297,22 +361,36 @@ export class EventManager {
     if (ref) this.markTaskWaiting(ref, ref.sessionId);
   }
 
-  private markTaskEnded(ref: TurnRef | undefined, sessionId: string | undefined, coreType: CoreEventType, status: string | undefined): void {
-    if (!ref || !sessionId) return;
+  private markTaskEnded(ref: TurnRef | undefined, sessionId: string | undefined, coreType: CoreEventType, payload: Record<string, unknown>) {
+    if (!ref || !sessionId) return null;
     const task = this.deps.taskRepo.get(ref.taskId);
-    if (!task) return;
+    if (!task || task.completedAt !== null) return null;
     const taskStatus = coreType === "task.completed" ? "completed" : coreType === "task.interrupted" ? "interrupted" : "failed";
     task.status = taskStatus;
     task.completedAt = nowMs();
     task.durationMs = task.completedAt - (task.startedAt ?? task.createdAt);
-    if (taskStatus === "failed") task.error = status ?? "failed";
+    const turn = payload.turn as { error?: { message?: unknown } } | undefined;
+    if (taskStatus === "failed") task.error = stringOr(turn?.error?.message, "Turn failed");
     this.deps.taskRepo.update(task);
+    if (task.turnId) {
+      this.deps.toolRepo.finishRunning(task.turnId, task.completedAt);
+      for (const [itemId, buffer] of this.agentBuffers) {
+        if (buffer.turnId === task.turnId) this.flushAgentMessage(itemId);
+      }
+    }
+    const persistedSession = this.deps.sessionRepo.get(sessionId);
+    if (persistedSession) {
+      persistedSession.status = taskStatus;
+      persistedSession.updatedAt = task.completedAt;
+      persistedSession.lastActivityAt = task.completedAt;
+      this.deps.sessionRepo.update(persistedSession);
+    }
     this.deps.stateManager.update((s) => {
       if (s.tasks.tasks[task.id]) s.tasks.tasks[task.id] = task;
       delete s.tasks.runningBySession[sessionId];
-      const session = s.sessions.sessions[sessionId];
-      if (session) session.status = taskStatus === "failed" ? "failed" : taskStatus === "interrupted" ? "interrupted" : "completed";
+      if (s.sessions.sessions[sessionId] && persistedSession) s.sessions.sessions[sessionId] = persistedSession;
     });
+    return task;
   }
 }
 

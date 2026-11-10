@@ -14,6 +14,11 @@ describe("markdown", () => {
     expect(markdownToPlainText("# Hi\n\nBody")).toBe("Hi\nBody");
   });
 
+  it("preserves identifiers and filenames while formatting Markdown emphasis", () => {
+    expect(markdownToPlainText("Open file_name.ts and `other_name.ts` for _details_."))
+      .toBe("Open file_name.ts and other_name.ts for details.");
+  });
+
   it("highlights a code line into colored segments", () => {
     const segments = highlightLine("const x = 1;", "ts");
     expect(segments.length).toBeGreaterThan(1);

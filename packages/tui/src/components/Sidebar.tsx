@@ -1,33 +1,100 @@
 import { Box, Text } from "ink";
 import type { SessionInfo } from "@dicode/core";
+import type { UiTokenUsage, UiTool } from "../state/ui-store.js";
 import { COLORS } from "../theme/colors.js";
-import { truncate } from "../utils/format.js";
 
-export interface SidebarProps {
-  sessions: SessionInfo[];
-  currentSessionId: string | null;
+interface SidebarProps {
+  session?: SessionInfo;
   projectName: string | null;
   projectPath: string | null;
+  tools: UiTool[];
+  diff: string | null;
+  tokenUsage: UiTokenUsage | null;
+  columns: number;
+  rows: number;
 }
 
-export function Sidebar({ sessions, currentSessionId, projectName, projectPath }: SidebarProps) {
+const compactNumber = new Intl.NumberFormat("en", { notation: "compact" });
+
+export function Sidebar({ session, projectName, projectPath, tools, diff, tokenUsage, columns, rows }: SidebarProps) {
+  const { additions, deletions, files } = summarizeDiff(diff);
+  const runningTools = tools.filter((tool) => tool.status === "running").length;
+  const context = tokenUsage?.modelContextWindow;
+
   return (
-    <Box borderStyle="single" borderColor={COLORS.border} width={32} flexDirection="column" paddingX={1}>
-      <Text bold color={COLORS.accentBlue}>SESSIONS</Text>
-      {sessions.length === 0 ? (
-        <Text color={COLORS.dim}>  (none)</Text>
-      ) : (
-        sessions.map((s) => (
-          <Text key={s.id} color={s.id === currentSessionId ? COLORS.text : COLORS.secondaryText}>
-            {s.id === currentSessionId ? "> " : "  "}
-            {truncate(s.title || s.id, 24)}
-          </Text>
-        ))
+    <Box
+      width={columns}
+      height={rows}
+      flexShrink={0}
+      flexDirection="column"
+      paddingLeft={1}
+      borderStyle="single"
+      borderTop={false}
+      borderBottom={false}
+      borderRight={false}
+      borderColor={COLORS.border}
+      overflow="hidden"
+    >
+      <Text bold color={COLORS.text} wrap="truncate-end">{session?.title || projectName || "Session"}</Text>
+      {projectPath && <Text color={COLORS.secondaryText} wrap="truncate-start">{projectPath}</Text>}
+      {session?.model && rows > 3 && <Text color={COLORS.secondaryText} wrap="truncate-end">{session.model}</Text>}
+      {tokenUsage && rows > 4 && (
+        <Text color={COLORS.secondaryText} wrap="truncate-end">
+          {compactNumber.format(tokenUsage.totalTokens)} tokens
+          {context ? ` · ${Math.round(tokenUsage.totalTokens / context * 100)}% context` : ""}
+        </Text>
       )}
-      <Text> </Text>
-      <Text bold color={COLORS.accentBlue}>PROJECT</Text>
-      <Text color={COLORS.text}>{projectName ?? "—"}</Text>
-      <Text color={COLORS.dim}>{projectPath ? truncate(projectPath, 30) : ""}</Text>
+      {rows > 7 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={COLORS.text}>Activity</Text>
+          {tools.length ? (
+            <Text color={COLORS.secondaryText} wrap="truncate-end">
+              {tools.length} tool {tools.length === 1 ? "call" : "calls"}{runningTools ? ` · ${runningTools} running` : ""}
+            </Text>
+          ) : (
+            <Text color={COLORS.secondaryText}>No tools used</Text>
+          )}
+        </Box>
+      )}
+      {rows > 11 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={COLORS.text}>Turn changes</Text>
+          {diff ? (
+            <Text color={COLORS.secondaryText} wrap="truncate-end">
+              {files > 0 && `${files} ${files === 1 ? "file" : "files"} · `}
+              <Text color={COLORS.success}>+{additions}</Text>
+              {" "}
+              <Text color={COLORS.error}>−{deletions}</Text>
+            </Text>
+          ) : (
+            <Text color={COLORS.secondaryText}>No changes reported</Text>
+          )}
+        </Box>
+      )}
+      {rows > 13 && (
+        <Box marginTop={1}>
+          <Text color={COLORS.secondaryText} wrap="truncate-end">Ctrl+X B Hide sidebar</Text>
+        </Box>
+      )}
     </Box>
   );
+}
+
+function summarizeDiff(diff: string | null) {
+  let files = 0;
+  let additions = 0;
+  let deletions = 0;
+  let inHunk = false;
+  for (const line of diff?.split(/\r?\n/) ?? []) {
+    if (line.startsWith("diff --git ")) {
+      files++;
+      inHunk = false;
+    } else if (line.startsWith("@@ ")) {
+      inHunk = true;
+    } else if (inHunk) {
+      if (line.startsWith("+")) additions++;
+      if (line.startsWith("-")) deletions++;
+    }
+  }
+  return { files, additions, deletions };
 }

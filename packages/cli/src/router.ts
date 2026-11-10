@@ -20,6 +20,7 @@ export function parseArgs(argv: string[]): CliOptions {
       case "-v":
         options.version = true;
         break;
+      case "doctor":
       case "--doctor":
         options.doctor = true;
         break;
@@ -50,6 +51,6 @@ Usage:
   dicode --resume       Resume the most recent session
   dicode --help         Show this help
   dicode --version      Show version
-  dicode --doctor       Run environment diagnostics
+  dicode doctor         Run environment diagnostics (alias: --doctor)
   dicode --paths        Print path resolution diagnostic
 `;
