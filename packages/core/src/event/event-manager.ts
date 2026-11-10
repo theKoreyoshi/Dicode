@@ -5,6 +5,8 @@ import type { StateManager } from "../state/state-manager.js";
 import { createId } from "../utils/id.js";
 import { nowMs } from "../utils/time.js";
 import type { CoreEvent, CoreEventType } from "./event-types.js";
+import { readMessagePresentation } from "./message-presentation.js";
+import { readToolPresentation } from "./tool-presentation.js";
 
 export type CoreEventListener = (event: CoreEvent) => void;
 
@@ -22,7 +24,7 @@ interface TurnRef {
   taskId: string;
 }
 
-interface AgentBuffer {
+interface AgentBuffer extends Pick<MessageRecord, "phase" | "kind"> {
   sessionId: string;
   taskId: string | null;
   turnId: string | null;
@@ -132,13 +134,13 @@ export class EventManager {
 
       case "item.started":
         if (!isAgentItem(payload)) return null;
-        this.getAgentBuffer(base);
+        this.getAgentBuffer(base, payload.item as Record<string, unknown>);
         return { ...base, type: "message.started", payload };
 
       case "item.completed":
         if (!isAgentItem(payload)) return null;
         this.getAgentBuffer(base);
-        if (base.itemId) this.flushAgentMessage(base.itemId, (payload.item as { text?: unknown }).text);
+        if (base.itemId) this.flushAgentMessage(base.itemId, payload.item as Record<string, unknown>);
         return { ...base, type: "message.completed", payload };
 
       case "tool.started":
@@ -147,6 +149,7 @@ export class EventManager {
         return { ...base, type: "tool.started", payload };
 
       case "shell.output":
+      case "tool.output":
         this.recordToolOutput(adapterEvent.itemId, payload.delta);
         return { ...base, type: "tool.output", payload };
 
@@ -162,6 +165,9 @@ export class EventManager {
       case "diff.updated":
         return { ...base, type: "diff.updated", payload };
 
+      case "plan.updated":
+        return { ...base, type: "plan.updated", payload };
+
       case "token.usage":
         return { ...base, type: "token.usage", payload };
 
@@ -171,6 +177,7 @@ export class EventManager {
         return null;
 
       case "approval.resolved":
+      case "approval.expired":
         return null;
 
       case "agent.error":
@@ -232,21 +239,25 @@ export class EventManager {
     }
   }
 
-  private getAgentBuffer({ sessionId, taskId, turnId, itemId, timestamp }: Pick<CoreEvent, "sessionId" | "taskId" | "turnId" | "itemId" | "timestamp">): AgentBuffer | undefined {
+  private getAgentBuffer(
+    { sessionId, taskId, turnId, itemId, timestamp }: Pick<CoreEvent, "sessionId" | "taskId" | "turnId" | "itemId" | "timestamp">,
+    item?: Record<string, unknown>,
+  ): AgentBuffer | undefined {
     if (!sessionId || !itemId) return;
     let buffer = this.agentBuffers.get(itemId);
     if (!buffer) {
-      buffer = { sessionId, taskId: taskId ?? null, turnId: turnId ?? null, content: "", startedAt: timestamp };
+      buffer = { sessionId, taskId: taskId ?? null, turnId: turnId ?? null, content: stringOr(item?.text, ""), startedAt: timestamp };
       this.agentBuffers.set(itemId, buffer);
     }
+    if (item) Object.assign(buffer, readMessagePresentation(item));
     return buffer;
   }
 
-  private flushAgentMessage(itemId: string, finalText?: unknown): void {
+  private flushAgentMessage(itemId: string, completedItem?: Record<string, unknown>): void {
     const buffer = this.agentBuffers.get(itemId);
     if (!buffer) return;
     this.agentBuffers.delete(itemId);
-    const content = stringOr(finalText, buffer.content);
+    const content = stringOr(completedItem?.text, buffer.content);
     if (!content) return;
     const record: MessageRecord = {
       id: createId("msg"),
@@ -256,6 +267,9 @@ export class EventManager {
       itemId,
       role: "assistant",
       content,
+      phase: buffer.phase,
+      kind: buffer.kind,
+      ...(completedItem ? readMessagePresentation(completedItem) : { incomplete: true }),
       sequence: this.deps.messageRepo.maxSequence(buffer.sessionId) + 1,
       createdAt: buffer.startedAt,
     };
@@ -269,10 +283,7 @@ export class EventManager {
   private recordToolStarted(event: Pick<CoreEvent, "sessionId" | "turnId" | "itemId" | "taskId" | "timestamp">, payload: Record<string, unknown>): ToolExecutionRecord | null {
     if (!event.sessionId || !event.itemId) return null;
     const item = payload.item as Record<string, unknown> | undefined;
-    const files = Array.isArray(item?.changes) ? item.changes as { path?: unknown }[] : [];
-    const firstPath = files[0]?.path;
-    const fileLabel = typeof firstPath === "string" ? firstPath + (files.length > 1 ? ` +${files.length - 1}` : "") : undefined;
-    const label = [item?.command, item?.tool, item?.query, item?.name, fileLabel].find((value) => typeof value === "string");
+    const { label } = readToolPresentation(item);
     const record: ToolExecutionRecord = {
       id: createId("tool"),
       sessionId: event.sessionId,
@@ -308,13 +319,12 @@ export class EventManager {
     const existing = this.deps.toolRepo.getByItemId(event.itemId) ?? this.recordToolStarted(event, payload);
     if (!existing) return;
     const item = payload.item as Record<string, unknown> | undefined;
+    const { label, output } = readToolPresentation(item, existing.output);
     existing.status = item?.status === "failed" || item?.status === "declined" || item?.success === false || (typeof item?.exitCode === "number" && item.exitCode !== 0)
       ? "failed"
       : "completed";
-    const output = item?.aggregatedOutput ?? item?.result ?? item?.error ?? item?.changes;
-    if (output != null) {
-      existing.output = (typeof output === "string" ? output : JSON.stringify(output)).slice(-16_000);
-    }
+    if (label) existing.toolName = label;
+    if (output != null) existing.output = output;
     existing.durationMs = typeof item?.durationMs === "number" ? item.durationMs : Math.max(0, event.timestamp - existing.createdAt);
     try {
       this.deps.toolRepo.update(existing);
@@ -378,6 +388,7 @@ export class EventManager {
         if (buffer.turnId === task.turnId) this.flushAgentMessage(itemId);
       }
     }
+    if (taskStatus !== "completed") this.deps.messageRepo.markUnfinishedAnswers(task.id);
     const persistedSession = this.deps.sessionRepo.get(sessionId);
     if (persistedSession) {
       persistedSession.status = taskStatus;
@@ -396,7 +407,7 @@ export class EventManager {
 
 function isAgentItem(payload: Record<string, unknown>): boolean {
   const item = payload.item as Record<string, unknown> | undefined;
-  return item?.type === "agentMessage";
+  return item?.type === "agentMessage" || item?.type === "plan";
 }
 
 function stringOr(value: unknown, fallback: string): string {

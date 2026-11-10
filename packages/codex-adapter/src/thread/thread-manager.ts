@@ -27,13 +27,14 @@ export class CodexThreadManager implements ThreadManager {
     if (options.model) params.model = options.model;
     if (options.modelProvider) params.modelProvider = options.modelProvider;
     if (options.sandbox) params.sandbox = options.sandbox;
+    if (options.approvalPolicy) params.approvalPolicy = options.approvalPolicy;
 
     const result = (await this.request(ClientMethods.threadStart, params)) as ThreadResult;
     return toThreadInfo(result.thread, result);
   }
 
   async resume(threadId: string, options: ResumeThreadOptions = {}): Promise<ThreadInfo> {
-    const params: Record<string, unknown> = { threadId };
+    const params: Record<string, unknown> = { threadId, excludeTurns: true };
     if (options.cwd) params.cwd = options.cwd;
     if (options.model) params.model = options.model;
 

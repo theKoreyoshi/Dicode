@@ -1,5 +1,43 @@
 # Test Report
 
+## Final source review · 2026-11-10
+
+TypeScript, ESLint, 150 unit tests, and Inno Setup source validation passed.
+The regression tests cover resizing a scrolled settings panel, upgrading an
+existing database with interrupted replies, cancelling a pending browser login,
+and redacting credentials in adapter diagnostics. All six Core integration
+tests against Codex 0.167.0 passed, including streaming and resuming a session
+after restart.
+
+## Terminal layout, concise transcript, and mouse scrolling · 2026-11-10
+
+| Check | Result |
+| --- | --- |
+| TypeScript, ESLint, Vitest | Passed. 146 unit tests across 26 files |
+| Codex 0.167.0 | Six Adapter and six Core integration tests passed against the bundled runtime |
+| Screen lifecycle | The updated `release/dicode.exe` entered and left the alternate screen once each. No adapter JSON or late frames appeared after exit |
+| Layout and resize | Windows ConPTY showed the bordered prompt and separate settings row. A 100×26 → 34×8 → 100×26 resize preserved command palette and exit behavior |
+| Concise transcript | Automated checks cover tool summaries, hidden intermediate output, authoritative final items and restored message phases from older SQLite sessions |
+| Packaged task and resume | The bundled runtime edited a disposable project, displayed completed file and shell summaries and the final answer, listed the change in `/diff`, and restored the transcript after restart |
+| Packaged mouse scrolling | A Windows ConPTY run checked visible transcript rows while scrolling over the output and prompt. Wheel events respected both bounds, preserved the draft, and still worked after resize. Keyboard arrows recalled input history, and Ctrl+Q restored terminal mouse mode |
+
+## Bundled Codex 0.167.0 for Windows x64 · 2026-11-10
+
+| Check | Result |
+| --- | --- |
+| TypeScript, ESLint, Vitest | Passed. 133 unit tests across 24 files |
+| Adapter and Core integration | 6 Adapter and 6 Core tests passed against the official 0.167.0 App Server |
+| Official App Server | Verified initialize, model, account, thread and config requests against the packaged release runtime |
+| Runtime archive and staged files | Verified the upstream archive SHA-256 and all seven coding runtime files. The installer and ZIP carry the pinned manifest, licenses and NOTICE |
+| Windows Setup | Installed to a temporary path with Chinese characters and spaces. The installed CLI verified the bundled runtime with a Windows-only PATH and invalid external Codex overrides. Uninstall removed the program and its PATH entry |
+| Portable CLI | Extracted the ZIP and used its bundled runtime for streaming, an actual file edit and `/diff`, Ctrl+C, and restart/resume |
+| First run | With isolated account data, diagnostics reported sign-in required. The packaged `dicode login` started browser OAuth, and Ctrl+C cancelled it. The packaged config, MCP and skills list commands returned App Server results |
+| Codex Plan and approval | Observed native plan progress and the final plan item. A live command approval test confirmed the server's resolution after denial. A separate live interrupt removed a pending approval |
+
+The Windows checks used this Windows 11 x64 host and isolated data directories.
+A separate clean VM and the user's completion of browser sign-in remain
+release acceptance checks.
+
 ## OpenCode-style TUI and Windows build · 2026-11-10
 
 | Check | Result |

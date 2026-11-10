@@ -4,6 +4,8 @@ export interface CliOptions {
   help: boolean;
   version: boolean;
   doctor: boolean;
+  login?: boolean;
+  inspect?: "config" | "mcp" | "skills";
   paths: boolean;
 }
 
@@ -24,9 +26,18 @@ export function parseArgs(argv: string[]): CliOptions {
       case "--doctor":
         options.doctor = true;
         break;
+      case "login":
+        options.login = true;
+        break;
+      case "config":
+      case "mcp":
+      case "skills":
+        options.inspect = arg;
+        break;
       case "--paths":
         options.paths = true;
         break;
+      case "resume":
       case "--resume":
       case "-r":
         options.resume = true;
@@ -49,8 +60,13 @@ Usage:
   dicode                Start the Dicode terminal UI
   dicode --cwd <path>   Start in the given project directory
   dicode --resume       Resume the most recent session
+  dicode resume         Resume the most recent session
   dicode --help         Show this help
   dicode --version      Show version
   dicode doctor         Run environment diagnostics (alias: --doctor)
+  dicode login          Sign in to Codex through your browser
+  dicode config         Show effective Codex settings
+  dicode mcp            List configured MCP servers
+  dicode skills         List skills for the current project
   dicode --paths        Print path resolution diagnostic
 `;

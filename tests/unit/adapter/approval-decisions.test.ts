@@ -35,4 +35,18 @@ describe("Codex approval decision payloads", () => {
     expect(respond).toHaveBeenNthCalledWith(1, 3, { action: "decline", content: null, _meta: null });
     expect(respond).toHaveBeenNthCalledWith(2, 4, result);
   });
+
+  it("expires only the resolved request on its server thread", async () => {
+    const respond = vi.fn();
+    const manager = new CodexApprovalManager(respond);
+    manager.handleServerRequest(9, "item/tool/requestUserInput", { threadId: "t1", turnId: "turn1" });
+    manager.handleServerRequest(10, "item/fileChange/requestApproval", { threadId: "t1", turnId: "turn2" });
+    expect(manager.expire(9, "t2")).toBeUndefined();
+    expect(manager.expire("9", "t1")).toBeUndefined();
+    expect(manager.expire(9, "t1")?.id).toBe(9);
+    expect(manager.expireTurn("t1", "turn1")).toEqual([]);
+    expect(manager.getPendingApprovals()).toMatchObject([{ id: 10 }]);
+    await expect(manager.respond("9", { kind: "deny" })).rejects.toThrow(/resolved/);
+    expect(respond).not.toHaveBeenCalled();
+  });
 });

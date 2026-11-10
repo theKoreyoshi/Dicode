@@ -1,8 +1,11 @@
 # Bundled Codex Runtime
 
-The production installer places a pinned `codex.exe` (and its companion
-binaries: `codex-code-mode-host.exe`, `codex-command-runner.exe`,
-`codex-windows-sandbox-setup.exe`) into this directory during Phase 6.
+The Windows packages stage the official Codex coding runtime under `runtime/codex`
+beside `dicode.exe`. The pinned `version.json` lists the exact source archive and
+the SHA-256 and size of each included file. The optional upstream voice subtree
+is outside Dicode's coding experience.
 
-The bundled runtime must be re-checked for license/distribution terms before
-packaging. See [docs/installation.md](../docs/installation.md).
+Use `npm run package:windows -- <Codex release tar.gz> [ISCC.exe]` from the
+repository root with Windows x64 Node.js 26 and Inno Setup 6. The builder verifies
+the archive and each runtime file, keeps the official package layout, and stages
+Codex LICENSE and NOTICE and the applicable Node.js and ripgrep notices.

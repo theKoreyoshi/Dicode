@@ -3,7 +3,7 @@ import type { AgentApprovalManager } from "../application/agent-adapter.js";
 import type { EventManager } from "../event/event-manager.js";
 import { ApprovalError } from "../errors/core-errors.js";
 import type { ApprovalRepository, TaskRepository } from "../storage/repositories.js";
-import type { ApprovalRecord } from "../storage/storage-types.js";
+import type { ApprovalRecord, ApprovalStatus } from "../storage/storage-types.js";
 import type { StateManager } from "../state/state-manager.js";
 import { createId } from "../utils/id.js";
 import { nowMs } from "../utils/time.js";
@@ -71,21 +71,9 @@ export class ApprovalManager {
 
   async respond(approvalId: string, decision: ApprovalDecision): Promise<void> {
     const record = this.requirePending(approvalId);
-    const adapterDecision = decision.kind === "approve" ? { kind: "approve" as const } : decision.kind === "deny" ? { kind: "deny" as const } : { kind: "custom" as const, result: (decision as { result: unknown }).result };
-    await this.adapterApprovals.respond(record.codexRequestId, adapterDecision);
+    await this.adapterApprovals.respond(record.codexRequestId, decision);
 
-    record.status = decision.kind === "approve" ? "approved" : decision.kind === "deny" ? "rejected" : "approved";
-    record.resolvedAt = nowMs();
-    this.approvalRepo.update(record);
-
-    this.stateManager.update((s) => {
-      s.approvals.approvals[record.id] = record;
-    });
-    this.eventManager.emit("approval.resolved", {
-      sessionId: record.sessionId,
-      taskId: record.taskId ?? undefined,
-      payload: record,
-    });
+    this.settle(record, approvalStatus(decision));
   }
 
   async reject(approvalId: string): Promise<void> {
@@ -102,14 +90,39 @@ export class ApprovalManager {
 
   expirePending(sessionIds: ReadonlySet<string>): void {
     for (const record of this.approvalRepo.listPending()) {
-      if (!sessionIds.has(record.sessionId)) continue;
-      record.status = "expired";
-      record.resolvedAt = nowMs();
-      this.approvalRepo.update(record);
-      this.stateManager.update((s) => {
-        s.approvals.approvals[record.id] = record;
-      });
+      if (sessionIds.has(record.sessionId)) this.settle(record, "expired");
     }
+  }
+
+  expireRequest(sessionId: string, requestId: string | number): void {
+    const pending = this.approvalRepo.listBySession(sessionId, "pending");
+    const record = pending.find((approval) => approval.codexRequestId === String(requestId));
+    if (record) this.settle(record, "expired");
+  }
+
+  private settle(record: ApprovalRecord, status: Exclude<ApprovalStatus, "pending">): void {
+    record.status = status;
+    record.resolvedAt = nowMs();
+    this.approvalRepo.update(record);
+    const remaining = this.approvalRepo.listBySession(record.sessionId, "pending");
+    const task = record.taskId ? this.taskRepo.get(record.taskId) : null;
+    if (task?.status === "waiting_approval" && !remaining.some((request) => request.taskId === task.id)) {
+      task.status = "running";
+      this.taskRepo.update(task);
+    }
+    this.stateManager.update((s) => {
+      s.approvals.approvals[record.id] = record;
+      if (task && s.tasks.tasks[task.id]) s.tasks.tasks[task.id] = task;
+      const session = s.sessions.sessions[record.sessionId];
+      if (session?.status === "waiting_approval" && remaining.length === 0 && s.tasks.runningBySession[session.id]) {
+        session.status = "running";
+      }
+    });
+    this.eventManager.emit("approval.resolved", {
+      sessionId: record.sessionId,
+      taskId: record.taskId ?? undefined,
+      payload: record,
+    });
   }
 
   private requirePending(approvalId: string): ApprovalRecord {
@@ -120,6 +133,16 @@ export class ApprovalManager {
     }
     return record;
   }
+}
+
+function approvalStatus(decision: ApprovalDecision): "approved" | "rejected" | "cancelled" {
+  if (decision.kind === "deny") return "rejected";
+  if (decision.kind === "custom") {
+    const result = decision.result as { decision?: unknown; action?: unknown } | null;
+    if (result?.decision === "cancel" || result?.action === "cancel") return "cancelled";
+    if (result?.decision === "decline" || result?.action === "decline") return "rejected";
+  }
+  return "approved";
 }
 
 function approvalTitle(request: ApprovalRequest): string {

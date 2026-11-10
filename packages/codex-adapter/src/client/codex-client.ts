@@ -1,5 +1,6 @@
 import { PRODUCT_NAME, PRODUCT_VERSION } from "@dicode/shared";
 import { CodexApprovalManager } from "../approval/approval-manager.js";
+import type { ApprovalRequest } from "../approval/approval-types.js";
 import { AdapterNotReadyError } from "../errors/adapter-errors.js";
 import { EventBus, type DicodeEventListener } from "../events/event-listener.js";
 import { mapNotification } from "../events/event-mapper.js";
@@ -15,6 +16,7 @@ import type { TurnInput, TurnInfo } from "../turn/turn-types.js";
 import type { ModelInfo, ModelListResult } from "../protocol/protocol-types.js";
 import { CapabilityManager, type AdapterCapabilities } from "./capability-manager.js";
 import { initializeClient, type ClientInfo } from "./initialization.js";
+import { loginWithBrowser, type CodexAccountStatus } from "./account.js";
 
 export type ConnectionStatus =
   | "disconnected"
@@ -28,6 +30,11 @@ export interface CodexClientOptions extends ProcessManagerOptions {
   clientInfo?: ClientInfo;
   defaultTimeoutMs?: number;
   logger?: Logger;
+}
+
+interface McpServerStatusPage {
+  data: Array<{ name: string; authStatus: string; tools: Record<string, unknown> }>;
+  nextCursor: string | null;
 }
 
 /**
@@ -149,6 +156,47 @@ export class CodexClient {
     await this.requireRpc().request("model/list", { limit: 1 }, timeoutMs);
   }
 
+  async readAccount(): Promise<CodexAccountStatus> {
+    this.requireReady();
+    return await this.requireRpc().request(ClientMethods.accountRead, { refreshToken: false }) as CodexAccountStatus;
+  }
+
+  async loginWithChatGpt(showUrl: (url: string) => void, signal: AbortSignal): Promise<void> {
+    this.requireReady();
+    const disconnected = new AbortController();
+    const off = this.onStatusChange((status) => {
+      if (status !== "ready") disconnected.abort(new Error("Codex App Server disconnected during sign-in."));
+    });
+    try {
+      await loginWithBrowser(this.requireRpc(), showUrl, AbortSignal.any([signal, disconnected.signal]));
+    } finally {
+      off();
+    }
+  }
+
+  async readEffectiveConfig(cwd: string): Promise<Record<string, unknown>> {
+    this.requireReady();
+    const result = await this.requireRpc().request(ClientMethods.configRead, { cwd }) as {
+      config: Record<string, unknown>;
+    };
+    return result.config;
+  }
+
+  async listMcpServerStatus(cursor: string | null): Promise<McpServerStatusPage> {
+    this.requireReady();
+    return await this.requireRpc().request(ClientMethods.mcpServerStatusList, {
+      cursor, detail: "toolsAndAuthOnly",
+    }) as McpServerStatusPage;
+  }
+
+  async listSkills(cwd: string): Promise<Array<{ name: string; enabled: boolean; scope: string }>> {
+    this.requireReady();
+    const result = await this.requireRpc().request(ClientMethods.skillsList, { cwds: [cwd] }) as {
+      data: Array<{ skills: Array<{ name: string; enabled: boolean; scope: string }> }>;
+    };
+    return result.data.flatMap((entry) => entry.skills);
+  }
+
   async listModels(): Promise<ModelInfo[]> {
     const result = (await this.requireRpc().request(ClientMethods.modelList, {})) as ModelListResult;
     return result.data ?? [];
@@ -208,6 +256,14 @@ export class CodexClient {
 
     rpc.onNotification((method, params) => {
       const record = (params ?? {}) as Record<string, unknown>;
+      if (method === ServerNotificationMethods.serverRequestResolved) {
+        const { threadId, requestId } = record;
+        if (typeof threadId === "string" && (typeof requestId === "string" || typeof requestId === "number")) {
+          const expired = this.approvalManager.expire(requestId, threadId);
+          if (expired) this.emitExpiredApproval(expired);
+        }
+        return;
+      }
       this.syncTurnState(method, record);
       const mapped = mapNotification({ method, params });
       this.eventBus.emit(mapped.type, {
@@ -236,7 +292,19 @@ export class CodexClient {
       this.turnManager.noteTurnStarted(threadId, turnId);
     } else if (method === ServerNotificationMethods.turnCompleted) {
       this.turnManager.noteTurnEnded(threadId, turnId);
+      if (turnId) {
+        for (const request of this.approvalManager.expireTurn(threadId, turnId)) this.emitExpiredApproval(request);
+      }
     }
+  }
+
+  private emitExpiredApproval(request: ApprovalRequest): void {
+    this.eventBus.emit("approval.expired", {
+      sessionId: request.threadId,
+      turnId: request.turnId,
+      itemId: request.itemId,
+      payload: { requestId: request.id },
+    });
   }
 
   private handleProcessExit(): void {

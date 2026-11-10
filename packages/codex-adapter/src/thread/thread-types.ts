@@ -11,12 +11,22 @@ export interface ThreadInfo {
 }
 
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export type AskForApproval = "untrusted" | "on-request" | "never" | {
+  granular: {
+    sandbox_approval: boolean;
+    rules: boolean;
+    skill_approval: boolean;
+    request_permissions: boolean;
+    mcp_elicitations: boolean;
+  };
+};
 
 export interface StartThreadOptions {
   cwd?: string;
   model?: string;
   modelProvider?: string;
   sandbox?: SandboxMode;
+  approvalPolicy?: AskForApproval;
 }
 
 export interface ResumeThreadOptions {

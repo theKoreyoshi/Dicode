@@ -32,3 +32,8 @@ export function getInstallDir(): string {
 export function getBundledRuntimeDir(installDir = getInstallDir()): string {
   return join(installDir, "runtime", "codex");
 }
+
+export function isPackagedDicode(): boolean {
+  // Set by the SEA bundle banner before importing Dicode.
+  return (globalThis as typeof globalThis & { DICODE_SEA?: boolean }).DICODE_SEA === true;
+}

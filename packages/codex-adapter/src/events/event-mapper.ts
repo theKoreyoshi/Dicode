@@ -49,6 +49,7 @@ export function mapNotification(notification: RawNotification): MappedEvent {
     case ServerNotificationMethods.itemCompleted:
       return itemEvent("completed", p, base);
     case ServerNotificationMethods.agentMessageDelta:
+    case ServerNotificationMethods.planDelta:
       return { type: "agent.message.delta", ...base, payload: p };
     case ServerNotificationMethods.reasoningTextDelta:
     case ServerNotificationMethods.reasoningSummaryTextDelta:
@@ -59,14 +60,19 @@ export function mapNotification(notification: RawNotification): MappedEvent {
     case ServerNotificationMethods.processOutputDelta:
       return { type: "shell.output", ...base, payload: p };
     case ServerNotificationMethods.fileChangeOutputDelta:
+      return { type: "tool.output", ...base, payload: p };
     case ServerNotificationMethods.fileChangePatchUpdated:
       return { type: "file.changed", ...base, payload: p };
+    case ServerNotificationMethods.mcpToolCallProgress:
+      return { type: "tool.output", ...base, payload: { ...p, delta: typeof p.message === "string" ? `${p.message}\n` : undefined } };
     case ServerNotificationMethods.turnDiffUpdated:
       return { type: "diff.updated", ...base, payload: p };
+    case ServerNotificationMethods.turnPlanUpdated:
+      return { type: "plan.updated", ...base, payload: p };
     case ServerNotificationMethods.threadTokenUsageUpdated:
       return { type: "token.usage", ...base, payload: p };
     case ServerNotificationMethods.threadStarted:
-      return { type: "session.created", ...base, payload: p };
+      return { type: "session.created", ...base, sessionId: stringOrUndefined((p.thread as Record | undefined)?.id) ?? threadId, payload: p };
     case ServerNotificationMethods.threadStatusChanged:
       return { type: "connection.status", ...base, payload: p };
     case ServerNotificationMethods.error:

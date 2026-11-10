@@ -2,8 +2,7 @@
  * Minimal structured logger for the adapter.
  *
  * Invariants:
- * - Console output is written to `stderr` only; `stdout` belongs to the
- *   JSON-RPC protocol channel.
+ * - Diagnostics go to a rolling file, away from the interactive terminal.
  * - Sensitive values (tokens, authorization headers) are redacted.
  * - Very large payloads are truncated before being written.
  * - Raw protocol frames are logged only in debug mode.
@@ -11,6 +10,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { getLogsDir } from "@dicode/shared";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -37,6 +37,7 @@ const SENSITIVE_PATTERNS: Array<[RegExp, string]> = [
   [/(api[_-]?key\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]"],
   [/sk-[A-Za-z0-9_-]{8,}/g, "[REDACTED]"],
 ];
+const SENSITIVE_FIELD = /^(?:authorization|(?:access|refresh|id)[_-]?token|token|(?:openai[_-]?)?api[_-]?key|password)$/iu;
 
 function redact(text: string): string {
   let out = text;
@@ -46,8 +47,7 @@ function redact(text: string): string {
   return out;
 }
 
-function truncate(value: unknown, max = 2000): string {
-  const text = typeof value === "string" ? value : safeStringify(value);
+function truncate(text: string, max = 2000): string {
   return text.length > max ? `${text.slice(0, max)}…(+${text.length - max} chars)` : text;
 }
 
@@ -61,24 +61,20 @@ function safeStringify(value: unknown): string {
 
 export class Logger {
   private readonly level: LogLevel;
-  private readonly logDir: string | null;
   private readonly maxFileBytes: number;
-  private logPath: string | null = null;
+  private readonly logPath: string | null;
 
   constructor(options: LoggerOptions = {}) {
     this.level = options.level ?? "info";
     this.maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
-    if (options.file !== false) {
-      this.logDir = options.logDir ?? defaultLogDir();
-      this.logPath = join(this.logDir, "adapter.log");
-      try {
-        mkdirSync(this.logDir, { recursive: true });
-      } catch {
-        this.logDir = null;
-        this.logPath = null;
-      }
-    } else {
-      this.logDir = null;
+    this.logPath = null;
+    if (options.file === false) return;
+    const directory = options.logDir ?? getLogsDir();
+    try {
+      mkdirSync(directory, { recursive: true });
+      this.logPath = join(directory, "adapter.log");
+    } catch {
+      // A read-only log directory must not prevent startup.
     }
   }
 
@@ -103,11 +99,10 @@ export class Logger {
     const entry = {
       timestamp: new Date().toISOString(),
       level,
-      message: redact(truncate(message)),
-      ...(fields ? { fields: truncateFields(fields) } : {}),
+      message: truncate(redact(message)),
+      ...(fields ? { fields: sanitizeFields(fields) } : {}),
     };
     const line = safeStringify(entry);
-    process.stderr.write(`${line}\n`);
     this.writeFile(line);
   }
 
@@ -134,17 +129,11 @@ export class Logger {
   }
 }
 
-function truncateFields(fields: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    out[key] = typeof value === "string" && value.length > 500 ? truncate(value, 500) : value;
-  }
-  return out;
-}
-
-function defaultLogDir(): string {
-  const base = process.env.APPDATA ?? process.env.LOCALAPPDATA ?? process.env.TMP ?? process.cwd();
-  return join(base, "Dicode", "logs");
+function sanitizeFields(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).map(([key, value]) => [
+    key,
+    SENSITIVE_FIELD.test(key) ? "[REDACTED]" : typeof value === "string" ? truncate(redact(value), 500) : value,
+  ]));
 }
 
 export const logger = new Logger();

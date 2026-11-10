@@ -55,6 +55,24 @@ export class CodexApprovalManager implements ApprovalManager {
     return [...this.pending.values()];
   }
 
+  expire(requestId: string | number, threadId: string): ApprovalRequest | undefined {
+    const key = String(requestId);
+    const request = this.pending.get(key);
+    if (request?.id !== requestId || request.threadId !== threadId) return undefined;
+    this.pending.delete(key);
+    return request;
+  }
+
+  expireTurn(threadId: string, turnId: string): ApprovalRequest[] {
+    const expired: ApprovalRequest[] = [];
+    for (const request of this.pending.values()) {
+      if (request.threadId !== threadId || request.turnId !== turnId) continue;
+      this.pending.delete(String(request.id));
+      expired.push(request);
+    }
+    return expired;
+  }
+
   async respond(requestId: string, decision: ApprovalDecision): Promise<void> {
     const request = this.requirePending(requestId);
     let result: unknown;
@@ -71,8 +89,13 @@ export class CodexApprovalManager implements ApprovalManager {
         break;
     }
 
-    this.respondFn(request.id, result);
     this.pending.delete(String(request.id));
+    try {
+      this.respondFn(request.id, result);
+    } catch (error) {
+      this.pending.set(String(request.id), request);
+      throw error;
+    }
   }
 
   async reject(requestId: string): Promise<void> {
@@ -136,6 +159,8 @@ function approvalResult(request: ApprovalRequest): unknown {
     }
     case "toolInput":
       return { answers: {} };
+    case "elicitation":
+      throw new ApprovalError("An MCP input request needs a structured response");
     default:
       return {};
   }

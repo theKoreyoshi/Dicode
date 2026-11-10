@@ -43,6 +43,7 @@ export interface TaskRecord {
 }
 
 export type MessageRole = "user" | "assistant";
+export type MessagePhase = "commentary" | "partial_answer" | "final_answer";
 
 export interface MessageRecord {
   id: string;
@@ -52,6 +53,9 @@ export interface MessageRecord {
   itemId: string | null;
   role: MessageRole;
   content: string;
+  phase?: MessagePhase;
+  kind?: "plan";
+  incomplete?: boolean;
   sequence: number;
   createdAt: number;
 }

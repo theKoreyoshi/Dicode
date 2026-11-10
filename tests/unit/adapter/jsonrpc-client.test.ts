@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { JsonRpcClient, type RpcTransport, type ServerRequest, type WireMessage } from "@dicode/codex-adapter";
+import { describe, expect, it, vi } from "vitest";
+import { JsonRpcClient, resolveProcessConfig, type RpcTransport, type ServerRequest, type WireMessage } from "@dicode/codex-adapter";
+import { loginWithBrowser } from "../../../packages/codex-adapter/src/client/account.js";
 
 class MockTransport implements RpcTransport {
   written: WireMessage[] = [];
@@ -67,6 +68,57 @@ describe("JsonRpcClient", () => {
     expect(seen).toEqual(["turn/completed"]);
   });
 
+  it("routes browser login by ID without replacing the normal event listener", async () => {
+    const transport = new MockTransport();
+    const client = new JsonRpcClient({ transport });
+    const events = vi.fn();
+    const showUrl = vi.fn();
+    client.onNotification(events);
+    const login = loginWithBrowser(client, showUrl, new AbortController().signal);
+    const sent = transport.written[0];
+    expect(sent).toMatchObject({ method: "account/login/start", params: { type: "chatgpt" } });
+    transport.deliver({ id: sent.id, result: { type: "chatgpt", loginId: "browser-login", authUrl: "https://auth.openai.com/" } });
+    await vi.waitFor(() => expect(showUrl).toHaveBeenCalledWith("https://auth.openai.com/"));
+    transport.deliver({ method: "account/login/completed", params: { loginId: "other", success: false } });
+    transport.deliver({ method: "account/login/completed", params: { loginId: "browser-login", success: true } });
+    await expect(login).resolves.toBeUndefined();
+    expect(events).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels an abandoned browser login in the runtime", async () => {
+    const transport = new MockTransport();
+    const client = new JsonRpcClient({ transport });
+    const controller = new AbortController();
+    const showUrl = vi.fn();
+    const login = loginWithBrowser(client, showUrl, controller.signal);
+    transport.deliver({ id: transport.written[0].id, result: {
+      type: "chatgpt", loginId: "browser-login", authUrl: "https://auth.openai.com/",
+    } });
+    await vi.waitFor(() => expect(showUrl).toHaveBeenCalledTimes(1));
+    controller.abort(new Error("cancelled by user"));
+    await vi.waitFor(() => expect(transport.written).toHaveLength(2));
+    const cancel = transport.written[1];
+    expect(cancel).toMatchObject({ method: "account/login/cancel", params: { loginId: "browser-login" } });
+    transport.deliver({ id: cancel.id, result: { status: "canceled" } });
+    await expect(login).rejects.toThrow("cancelled by user");
+  });
+
+  it("cancels browser login even before Codex replies with a URL", async () => {
+    const transport = new MockTransport();
+    const client = new JsonRpcClient({ transport });
+    const controller = new AbortController();
+    const showUrl = vi.fn();
+    const login = loginWithBrowser(client, showUrl, controller.signal);
+    try {
+      controller.abort(new Error("cancelled before startup"));
+      await expect(login).rejects.toThrow("cancelled before startup");
+      expect(showUrl).not.toHaveBeenCalled();
+      expect(transport.written.map((request) => request.method)).toEqual(["account/login/start"]);
+    } finally {
+      client.close();
+    }
+  });
+
   it("routes server requests to the handler", () => {
     const transport = new MockTransport();
     const client = new JsonRpcClient({ transport });
@@ -89,4 +141,12 @@ describe("JsonRpcClient", () => {
     const response = transport.written.find((m) => m.id === 9);
     expect(response?.error).toMatchObject({ code: -32601 });
   });
+});
+
+it("preserves separate user and Codex directories in the child environment", () => {
+  const config = resolveProcessConfig({
+    executablePath: process.execPath,
+    env: { HOME: "user-directory", CODEX_HOME: "codex-directory" },
+  });
+  expect(config.env).toMatchObject({ HOME: "user-directory", CODEX_HOME: "codex-directory" });
 });

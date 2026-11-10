@@ -32,7 +32,7 @@ export interface JsonRpcClientOptions {
 export class JsonRpcClient {
   private readonly transport: RpcTransport;
   private readonly requests: RequestManager;
-  private notificationHandler: NotificationHandler | null = null;
+  private readonly notificationHandlers = new Set<NotificationHandler>();
   private serverRequestHandler: ServerRequestHandler | null = null;
   private detachMessage: () => void;
   private detachError: () => void;
@@ -67,10 +67,8 @@ export class JsonRpcClient {
   }
 
   onNotification(handler: NotificationHandler): () => void {
-    this.notificationHandler = handler;
-    return () => {
-      this.notificationHandler = null;
-    };
+    this.notificationHandlers.add(handler);
+    return () => { this.notificationHandlers.delete(handler); };
   }
 
   onServerRequest(handler: ServerRequestHandler): () => void {
@@ -84,6 +82,7 @@ export class JsonRpcClient {
     this.detachMessage();
     this.detachError();
     this.transport.close();
+    this.notificationHandlers.clear();
     this.requests.failAll(new Error("JSON-RPC client closed"));
   }
 
@@ -108,7 +107,7 @@ export class JsonRpcClient {
 
     // Server -> client notification (event stream).
     if (id === undefined && typeof method === "string") {
-      this.notificationHandler?.(method, message.params);
+      for (const handler of this.notificationHandlers) handler(method, message.params);
       return;
     }
 

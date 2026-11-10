@@ -6,7 +6,7 @@ import {
   type MessageInput,
   type SessionInfo,
 } from "@dicode/core";
-import { createInitialUiState, readDiff, readTokenUsage, uiReducer, type UiAction, type UiState } from "../state/ui-store.js";
+import { createInitialUiState, readDiff, readPlan, readTokenUsage, uiReducer, type UiAction, type UiState } from "../state/ui-store.js";
 
 export interface UseDicodeAppOptions {
   core?: DicodeCore;
@@ -70,6 +70,7 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
     }
     sessionRef.current = session.id;
     const taskId = c.getState().tasks.runningBySession[session.id] ?? null;
+    const plan = c.getLatestSessionEvent(session.id, "plan.updated");
     dispatch({
       type: "SET_SESSION",
       sessionId: session.id,
@@ -77,6 +78,7 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
         messages: c.getMessages(session.id),
         tools: c.getToolExecutions(session.id),
         diff: readDiff(c.getLatestSessionEvent(session.id, "diff.updated")?.payload),
+        plan: plan ? readPlan(plan.payload, plan.createdAt) : null,
         tokenUsage: readTokenUsage(c.getLatestSessionEvent(session.id, "token.usage")?.payload),
         queuedPrompt: queued.get(session.id)?.text ?? null,
         taskId,
@@ -105,7 +107,14 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
   useEffect(() => {
     let disposed = false;
     let starting = true;
-    const instance = options.core ?? createDicodeCore();
+    let instance: DicodeCore;
+    try {
+      instance = options.core ?? createDicodeCore();
+    } catch (error) {
+      reportError(error);
+      dispatch({ type: "SET_STATUS", status: "error" });
+      return;
+    }
     coreRef.current = instance;
     const unsubscribe = instance.subscribe((event) => {
       dispatch({ type: "CORE_EVENT", event });

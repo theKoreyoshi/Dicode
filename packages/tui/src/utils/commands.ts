@@ -20,6 +20,7 @@ export const DICODE_COMMANDS = [
   { name: "cd", label: "Open project", description: "Open a recent project or enter /cd <directory>", group: "Session" },
   { name: "models", label: "Select model", description: "Choose a model from Codex", group: "Agent", aliases: ["model"], leader: "m" },
   { name: "agents", label: "Select agent", description: "Choose Build or Plan", group: "Agent", leader: "a", shortcut: "Shift+Tab" },
+  { name: "plan", label: "Enter Plan mode", description: "Switch to Plan mode or submit an inline planning prompt", group: "Agent" },
   { name: "effort", label: "Reasoning effort", description: "Choose a reasoning level for the model", group: "Agent", shortcut: "Ctrl+T" },
   { name: "diff", label: "Review changes", description: "View the latest turn diff", group: "Session", needsSession: true },
   { name: "sidebar", label: "Toggle sidebar", description: "Show or hide session details", group: "Session", leader: "b", needsSession: true },

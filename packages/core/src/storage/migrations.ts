@@ -130,4 +130,39 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_session_type ON events(session_id, type, created_at DESC);
     `,
   },
+  {
+    version: 3,
+    sql: `
+      ALTER TABLE messages ADD COLUMN phase TEXT;
+      ALTER TABLE messages ADD COLUMN is_plan INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE messages ADD COLUMN incomplete INTEGER NOT NULL DEFAULT 0;
+
+      UPDATE messages AS message
+      SET phase = json_extract(event.payload, '$.item.phase'),
+          is_plan = CASE WHEN json_extract(event.payload, '$.item.type') = 'plan' THEN 1 ELSE 0 END
+      FROM events AS event
+      WHERE event.type = 'message.completed'
+        AND message.role = 'assistant'
+        AND event.session_id = message.session_id
+        AND event.item_id = message.item_id
+        AND json_valid(event.payload);
+    `,
+  },
+  {
+    version: 4,
+    sql: `
+      UPDATE messages AS message
+      SET incomplete = 1
+      WHERE message.role = 'assistant'
+        AND message.phase IS NULL
+        AND message.is_plan = 0
+        AND message.incomplete = 0
+        AND EXISTS (
+          SELECT 1 FROM tasks AS task
+          WHERE task.session_id = message.session_id
+            AND task.status IN ('failed', 'interrupted')
+            AND (task.id = message.task_id OR (message.task_id IS NULL AND task.turn_id = message.turn_id))
+        );
+    `,
+  },
 ];

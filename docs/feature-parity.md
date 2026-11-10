@@ -1,63 +1,27 @@
-# Feature Parity
+# Dicode 与 Codex CLI 0.167.0 的功能对齐
 
-Targets map Dicode's P0/P1/P2 goals to the capabilities the App Server
-actually provides. This table is updated as each phase lands.
+Windows 发行包固定使用官方 Codex 0.167.0。Dicode TUI 通过 Core 和
+Adapter 使用 App Server 的 stdio JSON-RPC。以下状态以该版本的生成
+Schema 和实际验证为准。参见 [App Server 文档](https://learn.chatgpt.com/docs/app-server)
+和 [Codex 0.167.0 原生命令](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/tui/src/slash_command.rs)。
 
-Legend: `App Server` = native protocol support, `Adapter` / `Core` / `UI` =
-implemented in Dicode, `Test` = covered by an automated test.
+| 操作 | App Server | Dicode | 验证 |
+| --- | --- | --- | --- |
+| 新会话、多轮对话 | `thread/start`、`turn/start` | Adapter、Core、TUI | 真实运行时 |
+| 流式回复、追加指令、中断 | `item/agentMessage/delta`、`turn/steer`、`turn/interrupt` | Adapter、Core、TUI | 真实流式与中断，追加指令有协议和自动化覆盖 |
+| 会话恢复 | `thread/resume` | Adapter、Core、TUI 通过 Dicode 会话索引恢复 | 真实重启恢复 |
+| 模型与推理强度 | `model/list`、`turn/start` | Adapter、Core、TUI | 模型目录实测，选择参数有测试 |
+| Plan 模式 | `collaborationMode`、`turn/plan/updated`、`item/plan/delta` | Adapter、Core、TUI 提供 `/plan`、进度与最终方案 | 原生 Plan 事件与终端渲染分别验证 |
+| 命令、文件、MCP 工具 | 工具与输出通知、`turn/diff/updated` | Adapter、Core、TUI 展示工具、输出与最新一轮 Diff | 文件编辑和真实 Diff 有验证 |
+| 命令和文件审批 | App Server 双向审批请求与解析通知 | Adapter、Core、TUI 提供服务端允许的单次与会话范围 | 真实请求及中断撤回，终端选择有自动化覆盖 |
+| 权限与用户输入 | `item/permissions/requestApproval`、`item/tool/requestUserInput` | Adapter、Core、TUI 提供显式授权和输入选择 | 协议与终端测试 |
+| 登录与诊断 | `account/read`、`account/login/start` | CLI 提供 `dicode login` 和 `dicode doctor` | 协议测试与 Windows 包验证 |
+| 配置、MCP 和 Skills 列表 | `config/read`、`mcpServerStatus/list`、`skills/list` | CLI 提供 `dicode config`、`dicode mcp`、`dicode skills` | App Server 只读请求 |
+| 项目文件搜索 | `fuzzyFileSearch` | TUI 的 `@` 将路径插入草稿 | Windows 交互测试 |
 
-## P0 — core
+Dicode 的会话选择使用自己的会话索引，Codex 原生历史导入与管理仍待对齐。
+`/diff` 展示 Codex 报告的最近一轮变更。Codex 原生的 Git 工作区 Diff、独立
+Shell 输入、媒体附件、审查、上下文压缩、分叉与归档界面、MCP 表单、
+权限规则编辑、插件管理、远程会话和语音仍有界面或操作差异。
 
-| Capability | App Server | Adapter | Core | UI | Test |
-| --- | --- | --- | --- | --- | --- |
-| Launch Dicode TUI | n/a | - | - | pending | - |
-| New session | `thread/start` | pending | pending | pending | - |
-| Multi-turn chat | `turn/start` | pending | pending | pending | - |
-| Streaming output | `item/agentMessage/delta` | pending | pending | pending | - |
-| Resume session | `thread/resume` | pending | pending | pending | - |
-| History sessions | `thread/list` | pending | pending | pending | - |
-| Steer (append) | `turn/steer` | pending | pending | pending | - |
-| Interrupt | `turn/interrupt` | pending | pending | pending | - |
-| Tool calls | `item/started` + payloads | pending | pending | pending | - |
-| Shell execution | `command/exec` / item output | pending | pending | pending | - |
-| File read/modify | fs + file change events | pending | pending | pending | - |
-| Approvals | server->client requests | pending | pending | pending | - |
-| Diff view | `turn/diff/updated` | pending | pending | pending | - |
-| Markdown/code highlight | n/a | - | - | pending | - |
-| Project dir | `thread/start.cwd` | pending | pending | pending | - |
-| Error handling | `error` + exit detection | pending | pending | pending | - |
-
-## P1 — advanced
-
-| Capability | App Server | Notes |
-| --- | --- | --- |
-| Model switch | `model/list` + `thread/start.model` | verified |
-| Reasoning effort | turn settings | schema present |
-| MCP management | `mcpServer/*`, `mcpServerStatus/*` | schema present |
-| Skills | `skills/list`, `skills/config/write` | schema present |
-| Plan mode | `turn/plan/updated` | notification present |
-| Git status | n/a (fs + shell) | not a native method |
-| Code review | `review/start` | schema present |
-| Fork | `thread/fork` | verified in schema |
-| Archive | `thread/archive` | verified in schema |
-| Context management | `thread/compact/start` | schema present |
-| Multi-session switch | `thread/list` | verified |
-| Config management | `config/read` / `config/value/write` | verified read |
-| Command palette | n/a | UI-only |
-
-## P2 — extended
-
-| Capability | App Server | Notes |
-| --- | --- | --- |
-| Multi-agent | `multiAgentMode` (deprecated) / ultra effort | review before use |
-| Sub-agent status | `item/started` with subagent items | schema present |
-| Parallel tasks | `process/spawn` / queue methods | schema present |
-| Plugins | `plugin/*`, `marketplace/*` | schema present |
-
-## Known limitations
-
-1. `account/read` returns `{ type: "apiKey" }` for the current custom-provider
-   setup; full account/profile surfaces depend on auth mode.
-2. `multiAgentMode` is marked deprecated in the schema; use ultra reasoning
-   effort for proactive multi-agent behavior.
-3. `model/list` is the confirmed method name; there is no `account/list` alias.
+验证记录见 [测试报告](test-report.md)。

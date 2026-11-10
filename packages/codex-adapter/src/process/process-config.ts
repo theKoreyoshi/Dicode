@@ -1,8 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { RuntimeNotFoundError } from "../errors/adapter-errors.js";
-import { getBundledRuntimeDir } from "@dicode/shared";
+import { BUNDLED_CODEX_EXECUTABLE, BUNDLED_CODEX_FILES, getBundledRuntimeDir, isPackagedDicode } from "@dicode/shared";
 
 export interface ProcessConfig {
   /** Absolute path to codex.exe. */
@@ -29,36 +28,38 @@ export function resolveProcessConfig(
 ): ProcessConfig {
   const executablePath = resolveCodexExecutable(options.executablePath, options.bundledRuntimeDir);
   const cwd = options.cwd ?? process.cwd();
-  const home = options.codexHome ?? process.env.USERPROFILE ?? homedir();
-  const codexHome = options.codexHome ?? join(home, ".codex");
+  const env = { ...process.env, ...options.env };
+  const codexDirectory = options.codexHome ?? env.CODEX_HOME;
 
   return {
     executablePath,
     args: ["app-server", "--listen", options.listenUrl ?? "stdio://"],
     cwd,
     env: {
-      ...process.env,
-      ...(options.env ?? {}),
-      HOME: home,
-      CODEX_HOME: codexHome,
+      ...env,
+      ...(codexDirectory ? { CODEX_HOME: codexDirectory } : {}),
     },
   };
 }
 
 export function resolveCodexExecutable(explicit?: string, bundledRuntimeDir?: string): string {
   const candidates: string[] = [];
+  const bundled = bundledRuntimeDir ?? getBundledRuntimeDir();
+  const executable = join(bundled, BUNDLED_CODEX_EXECUTABLE);
 
-  // 1. Explicit override (dev/testing).
+  if (isPackagedDicode()) {
+    const missing = BUNDLED_CODEX_FILES.filter((file) => !isFile(join(bundled, file)));
+    if (missing.length) {
+      throw new RuntimeNotFoundError(`Incomplete bundled Codex runtime in ${bundled} (missing ${missing.join(", ")}). Reinstall or re-extract Dicode.`);
+    }
+    return executable;
+  }
+
   if (explicit) candidates.push(explicit);
-  // 2. Environment override (dev only; never used in the shipped product).
   if (process.env.DICODE_CODEX_EXE) candidates.push(process.env.DICODE_CODEX_EXE);
   if (process.env.CODEX_PATH) candidates.push(process.env.CODEX_PATH);
+  candidates.push(executable, join(bundled, "codex.exe"));
 
-  // 3. Bundled runtime shipped with Dicode (product mode).
-  const bundled = bundledRuntimeDir ?? defaultBundledRuntimeDir();
-  candidates.push(join(bundled, "codex.exe"));
-
-  // 4. System-installed Codex (dev fallback; ignored when bundled exists).
   const localAppData = process.env.LOCALAPPDATA;
   if (localAppData) {
     const binRoot = join(localAppData, "OpenAI", "Codex", "bin");
@@ -81,7 +82,7 @@ export function resolveCodexExecutable(explicit?: string, bundledRuntimeDir?: st
   }
 
   for (const candidate of candidates) {
-    if (candidate && existsSync(candidate)) return candidate;
+    if (isFile(candidate)) return candidate;
   }
 
   // Fall back to PATH lookup.
@@ -97,14 +98,18 @@ export function resolveCodexExecutable(explicit?: string, bundledRuntimeDir?: st
 
 function findOnPath(name: string): string | null {
   const pathVar = process.env.PATH ?? "";
-  for (const dir of pathVar.split(";")) {
+  for (const dir of pathVar.split(delimiter)) {
     if (!dir) continue;
     const candidate = join(dir, name);
-    if (existsSync(candidate)) return candidate;
+    if (isFile(candidate)) return candidate;
   }
   return null;
 }
 
-function defaultBundledRuntimeDir(): string {
-  return getBundledRuntimeDir();
+function isFile(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+  } catch {
+    return false;
+  }
 }

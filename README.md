@@ -14,9 +14,9 @@ request and press Enter to start a session. Use Ctrl+P to search commands and
 Ctrl+X followed by L to reopen a previous conversation. Use Shift+Tab to switch
 between Build and Plan.
 
-The Windows x64 build embeds Node.js. The default installer and portable ZIP
-use a complete, separately installed official Windows Codex runtime. Run `dicode doctor` to
-check runtime discovery and the App Server connection. See the
+The Windows x64 installer and portable ZIP include Node.js and the official
+Codex 0.167.0 coding runtime. On a new machine, use `dicode login` for browser
+sign-in. `dicode doctor` verifies the bundled files and the App Server connection. See the
 [installation guide](docs/windows-installation.md) and [TUI guide](docs/tui.md).
 
 ## Repository layout
@@ -33,7 +33,7 @@ schemas/
 runtime/
   codex/             bundled Codex runtime (deployed during packaging)
 installer/
-  wix/               WiX Toolset packaging sources
+  inno/              Windows x64 installer source
 tests/
   unit/ integration/ e2e/
 docs/

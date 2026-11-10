@@ -16,6 +16,7 @@
     "test:core": "vitest run --config vitest.integration.config.ts core-flow",
     "dev": "tsx packages/cli/src/index.ts",
     "build:exe": "node tools/build-exe.mjs",
+    "package:windows": "node tools/package-windows.mjs",
     "verify:app-server": "node tools/verify-app-server.mjs"
   },
   "devDependencies": {

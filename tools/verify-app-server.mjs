@@ -3,13 +3,13 @@
 // Codex App Server. This is a throwaway diagnostic, not the production adapter.
 
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 
-const CODEX_EXE = process.env.DICODE_CODEX_EXE ??
-  "C:\\Users\\29234\\AppData\\Local\\OpenAI\\Codex\\bin\\f71a721e0e6193a9\\codex.exe";
-const HOME = process.env.USERPROFILE;
-const CODEX_HOME = process.env.DICODE_CODEX_HOME ?? join(HOME, ".codex");
+const CODEX_EXE = process.argv[2] ?? process.env.DICODE_CODEX_EXE ??
+  fileURLToPath(new URL("../release/runtime/codex/bin/codex.exe", import.meta.url));
+const runtimeProfile = process.env.DICODE_CODEX_HOME ?? process.env.CODEX_HOME;
 
 const TIMEOUT_MS = Number(process.env.DICODE_RPC_TIMEOUT_MS ?? 15000);
 
@@ -17,8 +17,13 @@ function log(...args) {
   console.error("[dicode-verify]", ...args);
 }
 
+if (!existsSync(CODEX_EXE)) {
+  log("Codex executable missing. Pass the extracted runtime's bin/codex.exe path or set DICODE_CODEX_EXE.");
+  process.exit(1);
+}
+
 const child = spawn(CODEX_EXE, ["app-server", "--listen", "stdio://"], {
-  env: { ...process.env, HOME, CODEX_HOME },
+  env: { ...process.env, ...(runtimeProfile ? { CODEX_HOME: runtimeProfile } : {}) },
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
 });
@@ -97,7 +102,6 @@ function notify(method, params = undefined) {
 
 async function main() {
   log("codex exe:", CODEX_EXE);
-  log("codex home:", CODEX_HOME);
 
   const init = await request("initialize", {
     clientInfo: { name: "dicode", version: "0.1.0" },

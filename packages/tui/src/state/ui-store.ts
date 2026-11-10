@@ -1,12 +1,13 @@
-import type { ApprovalInfo, CoreEvent, MessageRecord, ModelInfo, SessionInfo, ToolExecutionRecord } from "@dicode/core";
+import { readMessagePresentation, readToolPresentation, type ApprovalInfo, type CoreEvent, type MessageRecord, type ModelInfo, type SessionInfo, type ToolExecutionRecord } from "@dicode/core";
 
-export interface UiMessage {
+export interface UiMessage extends Pick<MessageRecord, "phase" | "kind" | "incomplete"> {
   id: string;
   role: "user" | "assistant";
   content: string;
   streaming: boolean;
   timestamp?: number;
   taskId?: string;
+  turnId?: string;
 }
 
 export interface UiTool {
@@ -25,6 +26,13 @@ export interface UiTokenUsage {
   modelContextWindow: number | null;
 }
 
+export interface UiPlan {
+  turnId: string;
+  timestamp: number;
+  explanation?: string;
+  steps: Array<{ step: string; status: "pending" | "inProgress" | "completed" }>;
+}
+
 export type UiStatus = "initializing" | "ready" | "running" | "waiting_approval" | "error";
 
 export interface UiState {
@@ -36,6 +44,7 @@ export interface UiState {
   messages: UiMessage[];
   tools: UiTool[];
   diff: string | null;
+  plan: UiPlan | null;
   tokenUsage: UiTokenUsage | null;
   queuedPrompt: string | null;
   currentTaskId: string | null;
@@ -52,6 +61,7 @@ interface SessionView {
   messages: MessageRecord[];
   tools: ToolExecutionRecord[];
   diff: string | null;
+  plan?: UiPlan | null;
   tokenUsage: UiTokenUsage | null;
   queuedPrompt: string | null;
   taskId: string | null;
@@ -82,6 +92,7 @@ export function createInitialUiState(): UiState {
     messages: [],
     tools: [],
     diff: null,
+    plan: null,
     tokenUsage: null,
     queuedPrompt: null,
     currentTaskId: null,
@@ -113,6 +124,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
         messages: view?.messages.map(messageToUi) ?? [],
         tools: view?.tools.map(toolToUi) ?? [],
         diff: view?.diff ?? null,
+        plan: view?.plan ?? null,
         tokenUsage: view?.tokenUsage ?? null,
         queuedPrompt: view?.queuedPrompt ?? null,
         currentTaskId: view?.taskId ?? null,
@@ -167,7 +179,7 @@ function reduceCoreEvent(state: UiState, event: CoreEvent): UiState {
         status: failed ? "error" : "ready",
         currentTaskId: null,
         pendingApprovals: [],
-        messages: finishMessages(messages),
+        messages: finishMessages(messages, event.type !== "task.completed" ? event : undefined),
         tools: state.tools.map((tool) => tool.status === "running" ? { ...tool, status: "failed" } : tool),
         error: failed ? (typeof error === "string" ? error : "Codex turn failed") : null,
       };
@@ -187,6 +199,11 @@ function reduceCoreEvent(state: UiState, event: CoreEvent): UiState {
       return { ...state, tools: updateTool(state.tools, event) };
     case "diff.updated":
       return { ...state, diff: readDiff(event.payload) };
+    case "plan.updated": {
+      const plan = readPlan(event.payload, event.timestamp);
+      if (plan && state.plan?.turnId === plan.turnId) plan.timestamp = state.plan.timestamp;
+      return { ...state, plan };
+    }
     case "token.usage":
       return { ...state, tokenUsage: readTokenUsage(event.payload) };
     case "approval.requested": {
@@ -234,6 +251,10 @@ function messageToUi(message: MessageRecord): UiMessage {
     streaming: false,
     timestamp: message.createdAt,
     taskId: message.taskId ?? undefined,
+    turnId: message.turnId ?? undefined,
+    phase: message.phase,
+    kind: message.kind,
+    incomplete: message.incomplete,
   };
 }
 
@@ -244,6 +265,7 @@ function updateAssistantMessage(messages: UiMessage[], event: CoreEvent): UiMess
   const payload = record(event.payload);
   const item = record(payload.item);
   const completed = event.type === "message.completed";
+  if (existing && !existing.streaming && !completed) return messages;
   const initial = typeof item.text === "string" ? item.text : "";
   const content = completed && typeof item.text === "string"
     ? item.text
@@ -254,13 +276,22 @@ function updateAssistantMessage(messages: UiMessage[], event: CoreEvent): UiMess
     content,
     streaming: !completed,
     timestamp: existing?.timestamp ?? event.timestamp,
-    taskId: event.taskId,
+    taskId: event.taskId ?? existing?.taskId,
+    turnId: event.turnId ?? existing?.turnId,
+    phase: existing?.phase,
+    kind: existing?.kind,
+    ...readMessagePresentation(item),
   };
   return existing ? messages.map((message) => message.id === id ? updated : message) : [...messages, updated];
 }
 
-function finishMessages(messages: UiMessage[]): UiMessage[] {
-  return messages.filter((message) => message.content).map((message) => message.streaming ? { ...message, streaming: false } : message);
+function finishMessages(messages: UiMessage[], unsuccessful?: Pick<CoreEvent, "taskId" | "turnId">): UiMessage[] {
+  return messages.filter((message) => message.content).map((message) => {
+    const belongsToUnsuccessfulTurn = (unsuccessful?.taskId && message.taskId === unsuccessful.taskId) ||
+      (unsuccessful?.turnId && message.turnId === unsuccessful.turnId);
+    const unfinished = message.streaming || (belongsToUnsuccessfulTurn && message.role === "assistant" && !message.phase && !message.kind);
+    return unfinished ? { ...message, streaming: false, incomplete: true } : message;
+  });
 }
 
 function updateTool(tools: UiTool[], event: CoreEvent): UiTool[] {
@@ -271,21 +302,18 @@ function updateTool(tools: UiTool[], event: CoreEvent): UiTool[] {
   const item = record(payload.item);
   if (!existing && !payload.item) return tools;
   const type = typeof item.type === "string" ? item.type : existing?.type ?? "tool";
-  const files = Array.isArray(item.changes) ? item.changes : [];
-  const firstPath = record(files[0]).path;
-  const fileLabel = typeof firstPath === "string" ? firstPath + (files.length > 1 ? ` +${files.length - 1}` : "") : undefined;
-  const label = [item.command, item.tool, item.query, item.name, fileLabel].find((value): value is string => typeof value === "string");
   const done = event.type === "tool.completed" || (event.type === "file.changed" && Boolean(payload.item));
   const exitCode = typeof item.exitCode === "number" ? item.exitCode : existing?.exitCode;
   const failed = item.status === "failed" || item.status === "declined" || item.success === false || (exitCode != null && exitCode !== 0);
-  const result = item.aggregatedOutput ?? item.result ?? item.error;
-  const output = result != null
-    ? typeof result === "string" ? result : JSON.stringify(result)
-    : (existing?.output ?? "") + (typeof payload.delta === "string" ? payload.delta : "");
+  const presentation = readToolPresentation(
+    payload.item ?? (Array.isArray(payload.changes) ? { type, changes: payload.changes } : undefined),
+    done ? existing?.output : undefined,
+  );
+  const output = presentation.output ?? (existing?.output ?? "") + (typeof payload.delta === "string" ? payload.delta : "");
   const updated: UiTool = {
     id,
     type,
-    label: label ?? existing?.label ?? type,
+    label: presentation.label ?? existing?.label ?? type,
     status: done ? failed ? "failed" : "completed" : existing?.status ?? "running",
     timestamp: existing?.timestamp ?? event.timestamp,
     output: output.slice(-16_000),
@@ -310,6 +338,20 @@ function toolToUi(tool: ToolExecutionRecord): UiTool {
 export function readDiff(payload: unknown): string | null {
   const diff = record(payload).diff;
   return typeof diff === "string" ? diff : null;
+}
+
+export function readPlan(payload: unknown, timestamp: number): UiPlan | null {
+  const { turnId, explanation, plan } = record(payload);
+  if (typeof turnId !== "string" || !Array.isArray(plan)) return null;
+  const steps: UiPlan["steps"] = [];
+  for (const entry of plan) {
+    const { step, status } = record(entry);
+    if (typeof step === "string" && (status === "pending" || status === "inProgress" || status === "completed")) {
+      steps.push({ step, status });
+    }
+  }
+  if (!steps.length) return null;
+  return { turnId, timestamp, explanation: typeof explanation === "string" ? explanation : undefined, steps };
 }
 
 export function readTokenUsage(payload: unknown): UiTokenUsage | null {

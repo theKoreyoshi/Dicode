@@ -2,12 +2,36 @@
   "dicodeVersion": "0.1.0",
   "codexVersion": "0.167.0",
   "platform": "windows-x64",
-  "source": "https://github.com/openai/codex (official Codex CLI)",
+  "source": "https://github.com/openai/codex/releases/download/rust-v0.167.0/codex-package-x86_64-pc-windows-msvc.tar.gz",
+  "archiveSha256": "60567ca940bbaf6c10501805d9909d1328179231e2d47a0deec7a1368bb21641",
   "files": {
-    "codex.exe": {
+    "codex-package.json": {
+      "sha256": "fe61401d6677c47a7dfac403f727d8b34d17a90deca6aeedf0120a835478def4",
+      "sizeBytes": 261
+    },
+    "bin/codex.exe": {
       "sha256": "edfdd48f8b458af0906e507b4cb05217b326c3d6e515e9f024e05e3b8d650f70",
       "sizeBytes": 369062704
+    },
+    "bin/codex-code-mode-host.exe": {
+      "sha256": "5acd42f62966dd4a498ebfe04c5cae4c4a644a342a65a21bb53f8f36235c3d35",
+      "sizeBytes": 80328496
+    },
+    "bin/codex-exec-server.exe": {
+      "sha256": "948a1921c1f9e5ae0ddf178a520754c6ab253c871d9f2257560772f96942b5ff",
+      "sizeBytes": 79300912
+    },
+    "codex-path/rg.exe": {
+      "sha256": "14231169855ec5205cf5a1b6f1db358ff4aed4247c86b69ce8aae647c77f6680",
+      "sizeBytes": 4218880
+    },
+    "codex-resources/codex-command-runner.exe": {
+      "sha256": "798919649d3069dd6c16292d73f3a5e5239a69843bf4b7ca6e77f412ce6e0d82",
+      "sizeBytes": 8946992
+    },
+    "codex-resources/codex-windows-sandbox-setup.exe": {
+      "sha256": "6c55bfe87b35de7842c8025c6a9c041f682fcc5a80d26095579b50b4fa4ba57e",
+      "sizeBytes": 19564848
     }
-  },
-  "buildTime": "2026-11-09T17:15:31.128Z"
+  }
 }

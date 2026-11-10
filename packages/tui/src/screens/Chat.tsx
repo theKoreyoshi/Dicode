@@ -9,7 +9,7 @@ interface ChatProps {
   rows?: number;
   scrollOffset?: number;
   showToolDetails?: boolean;
-  onScrollLimitChange?: (limit: number) => void;
+  onScrollLimitChange?: (limit: number, rowDelta: number) => void;
 }
 
 export function Chat({
@@ -31,10 +31,13 @@ export function Chat({
       <MessageList
         messages={state.messages}
         tools={state.tools}
+        plan={state.plan}
         columns={messageColumns}
         rows={rows}
         scrollOffset={scrollOffset}
         showToolDetails={showToolDetails}
+        running={state.status === "running" || state.status === "waiting_approval"}
+        activeTaskId={state.currentTaskId}
         onScrollLimitChange={onScrollLimitChange}
       />
       {sidebarColumns > 0 && (

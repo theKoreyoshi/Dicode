@@ -19,6 +19,8 @@ export * from "./capability/capability-manager.js";
 
 export * from "./event/event-types.js";
 export * from "./event/event-manager.js";
+export * from "./event/message-presentation.js";
+export * from "./event/tool-presentation.js";
 
 export * from "./session/session-types.js";
 export * from "./session/session-manager.js";

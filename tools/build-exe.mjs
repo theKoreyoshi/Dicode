@@ -13,7 +13,8 @@ const require = createRequire(import.meta.url);
 const ROOT = process.cwd();
 const DIST = join(ROOT, "dist", "sea");
 const NODE_EXE = process.env.DICODE_SEA_NODE || process.execPath;
-const OUT_EXE = join(ROOT, "release", "dicode.exe");
+const RELEASE_DIR = resolve(ROOT, process.env.DICODE_RELEASE_DIR || "release");
+const OUT_EXE = join(RELEASE_DIR, "dicode.exe");
 
 const NODE_VERSION = execFileSync(NODE_EXE, ["--version"], { encoding: "utf8" }).trim();
 const ESBUILD_VERSION = JSON.parse(readFileSync(require.resolve("esbuild/package.json"), "utf8")).version;
@@ -23,7 +24,7 @@ const DICODE_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8
 console.log(`Node: ${NODE_VERSION} | esbuild: ${ESBUILD_VERSION} | postject: ${POSTJECT_VERSION} | Dicode: ${DICODE_VERSION}`);
 
 mkdirSync(DIST, { recursive: true });
-mkdirSync(join(ROOT, "release"), { recursive: true });
+mkdirSync(RELEASE_DIR, { recursive: true });
 
 const alias = {
   "@dicode/shared": resolve(ROOT, "packages/shared/src/index.ts"),
@@ -100,6 +101,6 @@ const buildInfo = {
   exeSha256: sha256,
   builtAt: new Date().toISOString(),
 };
-writeFileSync(join(ROOT, "release", "build-info.json"), `${JSON.stringify(buildInfo, null, 2)}\n`, "utf8");
+writeFileSync(join(RELEASE_DIR, "build-info.json"), `${JSON.stringify(buildInfo, null, 2)}\n`, "utf8");
 console.log("SHA-256:", sha256);
 console.log("build-info.json written.");

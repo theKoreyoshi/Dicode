@@ -21,6 +21,7 @@ export type CoreEventType =
   | "approval.resolved"
   | "file.changed"
   | "diff.updated"
+  | "plan.updated"
   | "token.usage"
   | "project.opened"
   | "project.closed"

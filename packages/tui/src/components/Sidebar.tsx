@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import type { SessionInfo } from "@dicode/core";
 import type { UiTokenUsage, UiTool } from "../state/ui-store.js";
 import { COLORS } from "../theme/colors.js";
+import { cleanInput } from "../utils/composer.js";
 
 interface SidebarProps {
   session?: SessionInfo;
@@ -35,9 +36,8 @@ export function Sidebar({ session, projectName, projectPath, tools, diff, tokenU
       borderColor={COLORS.border}
       overflow="hidden"
     >
-      <Text bold color={COLORS.text} wrap="truncate-end">{session?.title || projectName || "Session"}</Text>
-      {projectPath && <Text color={COLORS.secondaryText} wrap="truncate-start">{projectPath}</Text>}
-      {session?.model && rows > 3 && <Text color={COLORS.secondaryText} wrap="truncate-end">{session.model}</Text>}
+      <Text bold color={COLORS.text} wrap="truncate-end">{cleanInput(session?.title || projectName || "Session").replace(/\s+/gu, " ")}</Text>
+      {projectPath && <Text color={COLORS.secondaryText} wrap="truncate-start">{cleanInput(projectPath).replace(/\n/gu, " ")}</Text>}
       {tokenUsage && rows > 4 && (
         <Text color={COLORS.secondaryText} wrap="truncate-end">
           {compactNumber.format(tokenUsage.totalTokens)} tokens

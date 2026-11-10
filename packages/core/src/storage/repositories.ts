@@ -1,4 +1,5 @@
 import type { Database } from "./database.js";
+import { readMessagePhase } from "../event/message-presentation.js";
 import type {
   ApprovalRecord,
   EventRecord,
@@ -208,8 +209,8 @@ export class MessageRepository {
   insert(record: MessageRecord): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, session_id, task_id, turn_id, item_id, role, content, sequence, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (id, session_id, task_id, turn_id, item_id, role, content, sequence, created_at, phase, is_plan, incomplete)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -221,6 +222,9 @@ export class MessageRepository {
         record.content,
         record.sequence,
         record.createdAt,
+        record.phase ?? null,
+        record.kind === "plan" ? 1 : 0,
+        record.incomplete ? 1 : 0,
       );
   }
 
@@ -236,6 +240,11 @@ export class MessageRepository {
 
   delete(id: string): void {
     this.db.prepare("DELETE FROM messages WHERE id = ?").run(id);
+  }
+
+  markUnfinishedAnswers(taskId: string): void {
+    this.db.prepare("UPDATE messages SET incomplete = 1 WHERE task_id = ? AND role = 'assistant' AND phase IS NULL AND is_plan = 0")
+      .run(taskId);
   }
 
   maxSequence(sessionId: string): number {
@@ -360,8 +369,8 @@ export class ToolExecutionRepository {
 
   update(record: ToolExecutionRecord): void {
     this.db
-      .prepare(`UPDATE tool_executions SET status = ?, output = ?, duration_ms = ? WHERE id = ?`)
-      .run(record.status, record.output, record.durationMs, record.id);
+      .prepare(`UPDATE tool_executions SET tool_name = ?, status = ?, output = ?, duration_ms = ? WHERE id = ?`)
+      .run(record.toolName, record.status, record.output, record.durationMs, record.id);
   }
 
   getByItemId(itemId: string): ToolExecutionRecord | null {
@@ -458,6 +467,9 @@ function mapMessage(row: Row): MessageRecord {
     itemId: nullableStr(row, "item_id"),
     role: str(row, "role") as MessageRecord["role"],
     content: str(row, "content"),
+    phase: readMessagePhase(row.phase),
+    kind: row.is_plan === 1 ? "plan" : undefined,
+    incomplete: row.incomplete === 1 || undefined,
     sequence: num(row, "sequence"),
     createdAt: num(row, "created_at"),
   };

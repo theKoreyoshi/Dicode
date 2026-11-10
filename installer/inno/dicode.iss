@@ -1,11 +1,13 @@
 ; Dicode Windows installer (Inno Setup 6).
-; Build: iscc installer\inno\dicode.iss
-; Add /DBundleCodexRuntime only after confirming runtime redistribution rights.
+; The Windows packaging tool passes a verified staging directory for bundled builds.
 
 #define MyAppName "Dicode"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "Dicode"
 #define MyAppExeName "dicode.exe"
+#ifndef PackageStage
+#define PackageStage "..\..\release"
+#endif
 
 [Setup]
 AppId={{7B4F6E2A-1C4D-4F5A-9E3B-2A6D8C1F5E0B}
@@ -26,14 +28,12 @@ ChangesEnvironment=yes
 
 [Files]
 ; Dicode standalone EXE (Node 26 ESM SEA)
-Source: "..\..\release\dicode.exe"; DestDir: "{app}"; Flags: ignoreversion
-#ifdef BundleCodexRuntime
-Source: "..\..\runtime\codex\codex.exe"; DestDir: "{app}\runtime\codex"; Flags: ignoreversion
-Source: "..\..\runtime\codex\*"; DestDir: "{app}\runtime\codex"; Excludes: "codex.exe"; Flags: ignoreversion recursesubdirs
-#endif
+Source: "{#PackageStage}\dicode.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PackageStage}\runtime\codex\bin\codex.exe"; DestDir: "{app}\runtime\codex\bin"; Flags: ignoreversion
+Source: "{#PackageStage}\runtime\codex\*"; DestDir: "{app}\runtime\codex"; Excludes: "\bin\codex.exe"; Flags: ignoreversion recursesubdirs
 ; Product resources
 Source: "..\..\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
-Source: "..\..\release\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
+Source: "{#PackageStage}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 [Registry]
 ; Append install dir to current-user PATH (never overwrite), avoid duplicates.
@@ -45,7 +45,7 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "doctor"; Description: "Run diagnostics"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "doctor"; Description: "Run Dicode diagnostics and check sign-in status"; Flags: postinstall nowait skipifsilent
 
 [Code]
 function NeedsAddPath(Param: string): Boolean;

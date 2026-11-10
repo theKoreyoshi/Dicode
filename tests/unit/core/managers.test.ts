@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import {
   SessionManager,
   TaskManager,
   TaskError,
+  createDicodeCore,
   deriveTitle,
 } from "@dicode/core";
 import { createHarness } from "./helpers.js";
@@ -99,7 +100,7 @@ describe("TaskManager", () => {
     const task = await manager.sendMessage("s1", { text: "run tests" });
     expect(task.status).toBe("interrupted");
     expect(manager.getRunningTask("s1")).toBeNull();
-    expect(h.repos.message.listBySession("s1").map((message) => message.content)).toEqual(["run tests", "partial"]);
+    expect(h.repos.message.listBySession("s1")).toMatchObject([{ content: "run tests" }, { content: "partial", incomplete: true }]);
     expect(h.repos.tool.listBySession("s1")).toMatchObject([{ toolName: "npm test", status: "failed", output: "test failure" }]);
   });
 
@@ -162,6 +163,42 @@ describe("ApprovalManager", () => {
     expect(manager.getPending()).toHaveLength(0);
     await expect(manager.respond(record.id, { kind: "deny" })).rejects.toThrow(/already resolved/);
   });
+
+  it("releases the local approval state when the runtime closes its request", async () => {
+    const h = createHarness();
+    const directory = mkdtempSync(join(tmpdir(), "dicode-core-approval-"));
+    const core = createDicodeCore({ adapter: h.adapter, configDir: directory, dataDir: directory });
+    try {
+      await core.initialize();
+      const session = await core.createSession({ projectPath: directory });
+      const task = await core.sendMessage(session.id, { text: "review" });
+      const events = vi.fn();
+      const off = core.subscribe(events);
+      for (const id of [0, 1]) {
+        for (const listener of h.adapter.approvalListeners) listener({
+          id, threadId: session.codexThreadId, turnId: task.turnId ?? undefined,
+          method: "item/tool/requestUserInput", type: "toolInput", params: {}, createdAt: Date.now(), pending: true,
+        });
+      }
+      expect(core.getTask(task.id)?.status).toBe("waiting_approval");
+      h.adapter.emitEvent({
+        id: "evt", type: "approval.expired", sessionId: session.codexThreadId, timestamp: Date.now(), payload: { requestId: 0 },
+      });
+      expect(core.getTask(task.id)?.status).toBe("waiting_approval");
+      expect(core.getPendingApprovals()).toMatchObject([{ codexRequestId: "1" }]);
+      expect(events).toHaveBeenCalledWith(expect.objectContaining({
+        type: "approval.resolved", sessionId: session.id, payload: expect.objectContaining({ status: "expired" }),
+      }));
+      await core.respondApproval(core.getPendingApprovals()[0].id, { kind: "custom", result: { action: "cancel" } });
+      expect(core.getTask(task.id)?.status).toBe("running");
+      expect(core.listApprovals(session.id)).toEqual(expect.arrayContaining([expect.objectContaining({ status: "cancelled" })]));
+      off();
+    } finally {
+      await core.shutdown();
+      h.db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("EventManager", () => {
@@ -177,11 +214,29 @@ describe("EventManager", () => {
 
     h.events.handleAdapterEvent({ id: "e2", type: "agent.message.delta", sessionId: "s1", turnId: "turn-1", itemId: "i1", timestamp: now, payload: { delta: "hello " } });
     h.events.handleAdapterEvent({ id: "e3", type: "agent.message.delta", sessionId: "s1", turnId: "turn-1", itemId: "i1", timestamp: now, payload: { delta: "world" } });
-    h.events.handleAdapterEvent({ id: "e4", type: "item.completed", sessionId: "s1", turnId: "turn-1", itemId: "i1", timestamp: now, payload: { item: { type: "agentMessage" } } });
-    expect(h.repos.message.listBySession("s1").map((m) => m.content)).toContain("hello world");
+    h.events.handleAdapterEvent({ id: "e4", type: "item.completed", sessionId: "s1", turnId: "turn-1", itemId: "i1", timestamp: now, payload: { item: { type: "agentMessage", phase: "final_answer", text: "Hello world!" } } });
+    expect(h.repos.message.listBySession("s1")).toMatchObject([{ content: "Hello world!", phase: "final_answer" }]);
 
     h.events.handleAdapterEvent({ id: "e5", type: "turn.completed", sessionId: "s1", turnId: "turn-1", timestamp: now, payload: { turn: { id: "turn-1", status: "completed" } } });
     expect(h.repos.task.get("task1")?.status).toBe("completed");
+  });
+
+  it("persists native plans and MCP progress with the same final result as the UI", () => {
+    const h = createHarness();
+    insertSession(h);
+    const event = { id: "evt", sessionId: "thread-1", turnId: "turn-1", itemId: "mcp-1", timestamp: Date.now() };
+    const item = { type: "mcpToolCall", server: "workspace", tool: "search" };
+    const plan = { explanation: null, plan: [{ step: "Read sources", status: "inProgress" }] };
+    h.events.handleAdapterEvent({ ...event, type: "plan.updated", payload: plan });
+    h.events.handleAdapterEvent({ ...event, type: "item.completed", itemId: "plan-1", payload: { item: { type: "plan", text: "Read the project sources" } } });
+    h.events.handleAdapterEvent({ ...event, type: "tool.started", payload: { item } });
+    h.events.handleAdapterEvent({ ...event, type: "tool.output", payload: { delta: "Finding files\n" } });
+    h.events.handleAdapterEvent({ ...event, type: "tool.completed", payload: { item: { ...item, status: "completed", result: {
+      content: [{ type: "text", text: "Found index.ts" }, { type: "image", data: "large image payload" }],
+    } } } });
+    expect(h.repos.event.getLatestByType("s1", "plan.updated")?.payload).toEqual(plan);
+    expect(h.repos.message.listBySession("s1")).toMatchObject([{ itemId: "plan-1", kind: "plan", content: "Read the project sources" }]);
+    expect(h.repos.tool.listBySession("s1")).toMatchObject([{ toolName: "workspace/search", output: "Finding files\nFound index.ts\n[image]" }]);
   });
 });
 

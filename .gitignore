@@ -5,7 +5,9 @@ node_modules/
 dist/
 release/
 tools/runtime-compat/
-runtime/codex/*.exe
+/runtime/codex/*
+!/runtime/codex/README.md
+!/runtime/codex/version.json
 *.tsbuildinfo
 
 # Logs

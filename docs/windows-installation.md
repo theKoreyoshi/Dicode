@@ -15,9 +15,14 @@
 ```text
 Dicode/
   dicode.exe
-  runtime/codex/     （分发许可确认后包含）
+  runtime/codex/
+    bin/
+    codex-path/
+    codex-resources/
+    codex-package.json
+    version.json
   resources/
-  uninstall/
+  licenses/
 ```
 
 用户数据独立于安装目录：`%APPDATA%\Dicode\`（config/data/logs/cache）。
@@ -30,21 +35,18 @@ Dicode/
 
 运行 `Dicode-Setup-x64.exe`，安装完成后打开新的终端。也可解压
 `Dicode-Portable-x64.zip` 后直接运行其中的 `dicode.exe`。
-两个产物都已内嵌 Node.js，使用本机完整安装的官方 Codex Runtime。
-已安装 Codex Desktop 时，Dicode 可自动查找其 Windows Runtime。
-
-如果 Dicode 无法自动定位 Codex，请将 `DICODE_CODEX_EXE` 指向完整
-Runtime 目录内的 `codex.exe`，然后检查连接。请保留官方安装目录中的
-辅助程序，例如执行文件工具所需的 `codex-code-mode-host.exe`。诊断
-通过表示 App Server 可以连接。
+两个产物都包含 Node.js 与官方 Codex 0.167.0 Windows x64 编码运行时。
+启动时，Dicode 直接从安装目录或解压目录加载包内运行时和辅助程序。
+`dicode doctor` 检查文件、App Server 连接和账号状态。新设备若提示需要
+登录，运行 `dicode login`，在浏览器中完成官方 Codex 登录。
 
 ```powershell
-$env:DICODE_CODEX_EXE = 'C:\Tools\Codex\codex.exe'
 dicode doctor
+dicode login
 dicode --cwd 'D:\Projects\Demo'
 ```
 
-在当前终端运行便携版时，使用 `.\dicode.exe doctor` 和 `.\dicode.exe`。
+使用便携版时，在对应命令前加 `.\dicode.exe`，例如 `.\dicode.exe login`。
 Codex 的认证和模型配置由官方 Runtime 读取。
 
 ## 升级
@@ -53,10 +55,11 @@ Codex 的认证和模型配置由官方 Runtime 读取。
 
 ## 卸载
 
-删除程序文件与内置 Runtime，清理快捷方式与 PATH；默认保留用户数据，提供显式清理选项。
+卸载会删除程序文件与内置运行时，并清理快捷方式与 Dicode 的 PATH 条目。用户数据保留在用户目录中。
 
-## 合规阻塞
+## 运行时来源
 
-默认安装包使用外部 Runtime。仅在仓库记录的再分发条件满足后，才可用
-`iscc /DBundleCodexRuntime installer\inno\dicode.iss` 构建内置 Runtime 的版本。
-详见 [Runtime 分发结论](packaging/dicode-runtime-distribution-decision.md)。
+安装包使用 OpenAI 官方 Windows x64 发行包中的编码运行时，保留原始目录结构和二进制。
+文件包括 App Server、代码工具主机、命令执行服务器、Windows 沙箱辅助程序和 ripgrep。
+Dicode 当前支持文本编码交互，打包范围为官方发行版的编码组件。
+见 [运行时来源与校验](runtime-distribution.md)。

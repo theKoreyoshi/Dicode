@@ -21,6 +21,15 @@ describe("CodexThreadManager", () => {
     expect(request).toHaveBeenCalledWith("thread/start", { cwd: "C:\\proj" });
   });
 
+  it("uses the native sandbox and approval option when explicitly requested", async () => {
+    const request = vi.fn().mockResolvedValue({ thread: { id: "th1" } });
+    const manager = new CodexThreadManager(request);
+    await manager.start({ sandbox: "read-only", approvalPolicy: "untrusted" });
+    expect(request).toHaveBeenCalledWith("thread/start", { sandbox: "read-only", approvalPolicy: "untrusted" });
+    await manager.resume("th1");
+    expect(request).toHaveBeenCalledWith("thread/resume", { threadId: "th1", excludeTurns: true });
+  });
+
   it("lists threads from the data array", async () => {
     const request = vi.fn().mockResolvedValue({ data: [{ id: "a", preview: "one" }, { id: "b", preview: "two" }] });
     const manager = new CodexThreadManager(request);

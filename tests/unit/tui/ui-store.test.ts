@@ -20,13 +20,14 @@ describe("uiReducer", () => {
   });
 
   it("streams separate assistant items and reconciles each final payload", () => {
-    let state = receive(active(), "message.started", { item: { type: "agentMessage" } }, { itemId: "first" });
+    let state = receive(active(), "message.started", { item: { type: "agentMessage", phase: "commentary" } }, { itemId: "first" });
     state = receive(state, "message.delta", { delta: "hello " }, { itemId: "first" });
     state = receive(state, "message.delta", { delta: "world" }, { itemId: "first" });
-    state = receive(state, "message.completed", { item: { text: "Hello world!" } }, { itemId: "first" });
+    state = receive(state, "message.completed", { item: { type: "agentMessage", phase: "final_answer", text: "Hello world!" } }, { itemId: "first" });
+    state = receive(state, "message.delta", { delta: "late duplicate" }, { itemId: "first" });
     state = receive(state, "message.delta", { delta: "second item" }, { itemId: "second" });
     expect(state.messages).toMatchObject([
-      { id: "first", content: "Hello world!", streaming: false },
+      { id: "first", phase: "final_answer", content: "Hello world!", streaming: false },
       { id: "second", content: "second item", streaming: true },
     ]);
   });
@@ -36,7 +37,7 @@ describe("uiReducer", () => {
     state = receive(state, "message.delta", { delta: "partial" }, { itemId: "first", taskId: "task-1" });
     state = receive(state, "task.interrupted", {}, { taskId: "task-1" });
     expect(state.status).toBe("ready");
-    expect(state.messages).toMatchObject([{ content: "partial", streaming: false }]);
+    expect(state.messages).toMatchObject([{ content: "partial", streaming: false, incomplete: true }]);
   });
 
   it("keeps approvals scoped to the active session and until every request is resolved", () => {

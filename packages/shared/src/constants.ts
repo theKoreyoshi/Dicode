@@ -1,5 +1,16 @@
 export const PRODUCT_NAME = "Dicode";
 export const PRODUCT_VERSION = "0.1.0";
+export const BUNDLED_CODEX_VERSION = "0.167.0";
+export const BUNDLED_CODEX_EXECUTABLE = "bin/codex.exe";
+export const BUNDLED_CODEX_FILES = [
+  "codex-package.json",
+  BUNDLED_CODEX_EXECUTABLE,
+  "bin/codex-code-mode-host.exe",
+  "bin/codex-exec-server.exe",
+  "codex-resources/codex-command-runner.exe",
+  "codex-resources/codex-windows-sandbox-setup.exe",
+  "codex-path/rg.exe",
+] as const;
 export const PRODUCT_TAGLINE = "AI Coding Agent for Developers";
 
 /** Verified Codex App Server version used during Phase 1 validation. */

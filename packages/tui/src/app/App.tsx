@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolve } from "node:path";
 import { Box, Text, useApp, useStdout } from "ink";
 import type { DicodeCore } from "@dicode/core";
 import { COLORS } from "../theme/colors.js";
 import { Picker, type PickerItem } from "../components/CommandPalette.js";
 import { Header } from "../components/Header.js";
-import { COMPOSER_MAX_WIDTH, Input } from "../components/Input.js";
+import { COMPOSER_MAX_WIDTH, Input, measureComposerHeight } from "../components/Input.js";
 import { StatusBar } from "../components/StatusBar.js";
 import { ApprovalModal } from "../components/ApprovalModal.js";
 import { Chat } from "../screens/Chat.js";
@@ -15,7 +15,7 @@ import {
   commandShortcut, DICODE_COMMANDS, findCommand, findLeaderCommand,
   matchScore, parseCommand, type CommandName,
 } from "../utils/commands.js";
-import { cleanInput, composerLines, editComposer, fileCompletion, moveBetweenLines } from "../utils/composer.js";
+import { cleanInput, editComposer, fileCompletion, moveBetweenLines } from "../utils/composer.js";
 import { useDicodeApp } from "./useDicodeApp.js";
 import { useTerminalInput } from "./useTerminalInput.js";
 
@@ -26,20 +26,23 @@ const EMPTY_DIALOG = { query: "", index: 0 };
 export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; core?: DicodeCore }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const [size, setSize] = useState(() => ({ columns: stdout.columns || 80, rows: stdout.rows || 24 }));
+  const [size, setSize] = useState(() => frameSize(stdout));
   const { columns, rows } = size;
-  useEffect(() => {
-    const resize = () => setSize({ columns: stdout.columns || 80, rows: stdout.rows || 24 });
-    stdout.on("resize", resize);
-    if (stdout.isTTY) stdout.write("\u001b[?2004h");
-    return () => {
-      stdout.off("resize", resize);
-      if (stdout.isTTY && !stdout.destroyed) stdout.write("\u001b[?2004l");
+  const tooSmall = rows < 7 || columns < 20;
+  const bodyRows = Math.max(1, rows - 2);
+  useLayoutEffect(() => {
+    const resize = () => {
+      const next = frameSize(stdout);
+      setSize((previous) => previous.columns === next.columns && previous.rows === next.rows ? previous : next);
     };
+    // Update the viewport before Ink draws using the new terminal geometry.
+    stdout.prependListener("resize", resize);
+    return () => { stdout.off("resize", resize); };
   }, [stdout]);
 
   const app = useDicodeApp({ cwd, resume, core });
   const state = app.state;
+  const authError = isAuthenticationError(state.error);
   const running = state.status === "running" || state.status === "waiting_approval";
   const approval = state.pendingApprovals[0];
   const session = state.sessions.find((item) => item.id === state.sessionId);
@@ -51,6 +54,10 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   const [showToolDetails, setShowToolDetails] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [scrollLimit, setScrollLimit] = useState(0);
+  const updateScrollLimit = useCallback((limit: number, rowDelta = 0) => {
+    setScrollLimit(limit);
+    setScrollOffset((offset) => offset === 0 ? 0 : clampOffset(offset + rowDelta, limit));
+  }, []);
   const [cursorPosition, setCursor] = useState(0);
   const cursor = Math.min(cursorPosition, app.input.length);
   const [completionIndex, setCompletionIndex] = useState(0);
@@ -72,11 +79,12 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       hint: commandShortcut(command), aliases: "aliases" in command ? command.aliases.join(" ") : "",
     }]
   ));
-  const activeModelId = state.selectedModel ?? session?.model ?? app.core?.getConfig().agent.defaultModel ??
+  const config = app.core?.getConfig();
+  const activeModelId = state.selectedModel ?? session?.model ?? config?.agent.defaultModel ??
     state.models.find((item) => item.isDefault)?.model ?? null;
   const activeModel = state.models.find((item) => item.model === activeModelId);
   const efforts = activeModel?.supportedReasoningEfforts ?? [];
-  const activeEffort = state.selectedEffort ?? activeModel?.defaultReasoningEffort ?? app.core?.getConfig().agent.reasoningEffort ?? null;
+  const activeEffort = state.selectedEffort ?? activeModel?.defaultReasoningEffort ?? config?.agent.reasoningEffort ?? null;
   const activeDialog = approval ? null : dialog;
   const dialogItems: PickerItem[] = ({
     commands: commandItems,
@@ -124,15 +132,31 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   const fileItems = fileKey && files?.key === fileKey ? files.paths.map((path) => ({ id: path, label: path })) : [];
   const suggestions = slashQuery !== undefined ? slashItems : fileItems;
   const suggestionIndex = Math.min(completionIndex, Math.max(0, suggestions.length - 1));
-  const suggestionsOpen = slashQuery !== undefined || fileKey !== null;
-
   const horizontalPadding = columns < 44 ? 1 : 2;
   const composerWidth = Math.min(COMPOSER_MAX_WIDTH, Math.max(1, columns - horizontalPadding * 2));
-  const composerMaxRows = Math.max(1, Math.min(5, Math.floor(rows / 4)));
-  const suggestionsRows = Math.max(1, Math.min(5, Math.floor(rows / 4)));
-  const composerHeight = composerLines(app.input, cursor, Math.max(4, composerWidth - 4), composerMaxRows).length +
-    1 + Number(Boolean(state.queuedPrompt)) + (suggestionsOpen ? 1 + Math.max(1, Math.min(suggestionsRows, suggestions.length)) : 0);
-  const viewportRows = Math.max(1, rows - 3 - composerHeight);
+  const composerProps = {
+    value: app.input, cursor, width: composerWidth,
+    maxRows: Math.max(1, Math.min(5, Math.floor(bodyRows / 4))),
+    compact: rows < 11, queued: state.queuedPrompt,
+  };
+  const promptRows = measureComposerHeight(composerProps);
+  const suggestionsRows = Math.max(0, Math.min(5, bodyRows - promptRows - 1 - Number(Boolean(state.sessionId))));
+  const suggestionsOpen = suggestionsRows > 0 && (slashQuery !== undefined || fileKey !== null);
+  const composerHeight = promptRows + (suggestionsOpen ? 1 + Math.max(1, Math.min(suggestionsRows, suggestions.length)) : 0);
+  const viewportRows = Math.max(1, bodyRows - composerHeight);
+  const pageRows = Math.max(1, bodyRows - 2);
+  const diffLines = activeDialog === "diff" && state.diff ? cleanInput(state.diff).split("\n") : [];
+  const statusLines = [
+    ["Connection", `Codex App Server · ${app.core?.getStatus() ?? "starting"}`],
+    ["Project", state.projectPath ?? process.cwd()],
+    ["Agent", mode === "plan" ? "Plan" : "Build"],
+    ["Model", activeModelId ?? "Runtime default"],
+    ["Reasoning", activeEffort ?? "Runtime default"],
+    ["Runtime", config?.runtime.codexPath ?? "Auto-detected"],
+    ...(state.error ? [["Error", cleanInput(state.error).split("\n", 1)[0]]] : []),
+  ];
+  const dialogLimit = Math.max(0, (activeDialog === "diff" ? diffLines.length : statusLines.length) - pageRows);
+  const dialogOffset = clampOffset(picker.index, dialogLimit);
 
   function replaceInput(value: string, nextCursor = value.length) {
     app.setInput(value);
@@ -167,6 +191,17 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
         break;
       case "models": openDialog("models"); break;
       case "agents": openDialog("agents"); break;
+      case "plan":
+        if (running) {
+          app.dispatch({ type: "SET_NOTICE", message: "Finish or interrupt the active turn before entering Plan mode." });
+          break;
+        }
+        setMode("plan");
+        if (args) {
+          replaceInput(args);
+          void sendPrompt(args, false, "plan");
+        }
+        break;
       case "effort":
         if (args && efforts.some((item) => item.reasoningEffort === args)) chooseEffort(args);
         else openDialog("effort");
@@ -222,15 +257,19 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     if (parsed) {
       const command = findCommand(parsed.command);
       if (command) {
-        replaceInput("");
+        if (command.name !== "plan" || !running) replaceInput("");
         runCommand(command.name, parsed.args);
         return;
       }
       app.dispatch({ type: "SET_NOTICE", message: `Unknown command /${parsed.command}. Try /help.` });
       return;
     }
+    await sendPrompt(text, queue, mode);
+  }
+
+  async function sendPrompt(text: string, queue: boolean, promptMode: Mode) {
     const accepted = await app.sendMessage(text, {
-      model: state.selectedModel ?? undefined, effort: state.selectedEffort ?? undefined, mode, queue,
+      model: state.selectedModel ?? undefined, effort: state.selectedEffort ?? undefined, mode: promptMode, queue,
     });
     if (!accepted) return;
     setHistory((entries) => [text, ...entries.filter((entry) => entry !== text)].slice(0, 100));
@@ -252,6 +291,17 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     replaceInput(browse.index < 0 ? browse.draft : entries[browse.index]);
   }
 
+  function scrollTranscript(rowsTowardHistory: number) {
+    setScrollOffset((offset) => clampOffset(offset + rowsTowardHistory, scrollLimit));
+  }
+
+  function scrollDialog(delta: number) {
+    setPicker((current) => {
+      const index = clampOffset(clampOffset(current.index, dialogLimit) + delta, dialogLimit);
+      return index === current.index ? current : { ...current, index };
+    });
+  }
+
   useTerminalInput((input, key, pasted) => {
     const action = pasted ? "none" :
       resolveKeyAction({ input, key }, { running, modalOpen: Boolean(activeDialog), inputFocused: true });
@@ -260,19 +310,16 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       if (key.ctrl && input === "c") void app.interrupt();
       return;
     }
-    if (state.status === "initializing" || !app.core) return;
     if (key.ctrl && input === "c" && running) { void app.interrupt(); return; }
+    if (tooSmall || state.status === "initializing" || !app.core) return;
     if (activeDialog) {
       if (action === "close" || action === "commandPalette" && activeDialog === "commands") {
         setDialog(null);
         return;
       }
-      if (activeDialog === "status") return;
-      if (activeDialog === "diff") {
-        const step = Math.max(1, rows - 8);
-        const delta = key.pageUp ? -step : key.pageDown ? step : key.upArrow ? -1 : key.downArrow ? 1 : 0;
-        const max = Math.max(0, (state.diff?.split("\n").length ?? 0) - step);
-        setPicker((current) => ({ ...current, index: Math.max(0, Math.min(max, current.index + delta)) }));
+      if (activeDialog === "diff" || activeDialog === "status") {
+        const delta = key.pageUp ? -pageRows : key.pageDown ? pageRows : key.upArrow ? -1 : key.downArrow ? 1 : 0;
+        if (delta) scrollDialog(delta);
         return;
       }
       if (key.return && filtered[selectedIndex]) choose(filtered[selectedIndex]);
@@ -308,13 +355,13 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     }
     switch (action) {
       case "send":
-        if (suggestions.length) {
+        if (suggestionsOpen && suggestions.length) {
           const exact = slashQuery !== undefined && findCommand(slashQuery);
           if (exact && completionIndex === 0) void submit();
           else completeSuggestion(true);
         } else if (slashQuery !== "") void submit();
         break;
-      case "complete": completeSuggestion(false); break;
+      case "complete": if (suggestionsOpen) completeSuggestion(false); break;
       case "newline": replaceInput(app.input.slice(0, cursor) + "\n" + app.input.slice(cursor), cursor + 1); break;
       case "newSession": runCommand("new"); break;
       case "commandPalette": openDialog("commands"); break;
@@ -331,8 +378,8 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       case "cancel": void app.interrupt(); break;
       case "historyUp": moveHistory(-1); break;
       case "historyDown": moveHistory(1); break;
-      case "scrollUp": setScrollOffset((offset) => Math.min(scrollLimit, offset + Math.max(1, viewportRows - 1))); break;
-      case "scrollDown": setScrollOffset((offset) => Math.max(0, offset - Math.max(1, viewportRows - 1))); break;
+      case "scrollUp": scrollTranscript(Math.max(1, viewportRows - 1)); break;
+      case "scrollDown": scrollTranscript(-Math.max(1, viewportRows - 1)); break;
       case "none": {
         const next = editComposer(app.input, cursor, { input, key });
         if (next.value !== app.input) {
@@ -342,13 +389,24 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
         break;
       }
     }
+  }, (direction) => {
+    if (tooSmall || approval) return;
+    if (activeDialog === "diff" || activeDialog === "status") scrollDialog(direction * 3);
+    else if (!activeDialog && state.sessionId) scrollTranscript(-direction * 3);
   });
+
+  if (tooSmall) {
+    return <Box width={columns}><Text wrap="truncate-end" color={COLORS.secondaryText}>Resize terminal · Ctrl+Q quit</Text></Box>;
+  }
 
   if (state.status === "initializing" || !app.core) {
     return (
-      <Box flexDirection="column" padding={1}>
+      <Box flexDirection="column" width={columns} height={rows} overflow="hidden" paddingX={1}>
         <Text bold color={state.error ? COLORS.error : COLORS.accentBlue}>{state.error ? "Dicode could not start" : "Starting Codex App Server…"}</Text>
         {state.error && <Text color={COLORS.text}>{cleanInput(state.error)}</Text>}
+        {authError && (
+          <Text color={COLORS.warning}>Check provider credentials. For ChatGPT sign-in, run dicode login.</Text>
+        )}
         <Text color={COLORS.secondaryText}>{state.error ? "Run dicode doctor for diagnostics · Ctrl+Q quit" : "Ctrl+Q quit"}</Text>
       </Box>
     );
@@ -356,57 +414,70 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   const composer = (
     <Box width={composerWidth} flexDirection="column" flexShrink={0}>
-      <Input value={app.input} cursor={cursor} width={composerWidth} maxRows={composerMaxRows}
+      <Input {...composerProps}
         focused={!approval && !dialog} running={running} mode={mode} model={activeModel?.displayName ?? activeModelId}
-        effort={activeEffort} queued={state.queuedPrompt} />
+        effort={activeEffort} />
       {suggestionsOpen && <Picker title={slashQuery !== undefined ? "Commands" : "Project files"}
         items={suggestions} selectedIndex={suggestionIndex} rows={suggestionsRows} inline
         empty={slashQuery !== undefined ? "No matching commands" : files?.key === fileKey ? "No matching files" : "Searching…"} />}
     </Box>
   );
-  const config = app.core.getConfig();
-  const diffStep = Math.max(1, rows - 8);
   return (
-    <Box flexDirection="column" width={columns}>
+    <Box flexDirection="column" width={columns} height={rows} overflow="hidden">
       <Header status={state.status} projectName={state.projectName} sessionId={state.sessionId}
-        sessionTitle={session?.title} model={activeModelId} columns={columns} />
+        sessionTitle={session?.title} columns={columns} />
+      <Box height={bodyRows} flexDirection="column" flexShrink={0} overflow="hidden">
       {approval ? (
-        <ApprovalModal key={approval.id} approval={approval} rows={rows} columns={columns}
+        <ApprovalModal key={approval.id} approval={approval} rows={bodyRows} columns={columns}
           onDecision={(decision) => app.respondApproval(approval.id, decision)} />
       ) : activeDialog === "status" ? (
         <Box paddingX={1} flexDirection="column">
-          <Text color={COLORS.accentBlue} bold>Runtime status</Text>
-          <Text wrap="truncate-end">Codex App Server · {app.core.getStatus()}</Text>
-          <Text wrap="truncate-end">Project · {state.projectPath ?? process.cwd()}</Text>
-          <Text wrap="truncate-end">Model · {activeModelId ?? "Runtime default"}</Text>
-          <Text wrap="truncate-end">Runtime · {config.runtime.codexPath ?? "Auto-detected"}</Text>
-          <Text color={COLORS.secondaryText}>Esc close</Text>
+          <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
+          {statusLines.slice(dialogOffset, dialogOffset + pageRows).map(([label, value]) => (
+            <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
+          ))}
+          <Text wrap="truncate-end" color={COLORS.secondaryText}>↑↓ scroll · Esc close</Text>
         </Box>
       ) : activeDialog === "diff" ? (
         <Box paddingX={1} flexDirection="column">
           <Text color={COLORS.accentBlue} bold>Latest turn changes</Text>
-          {state.diff ? cleanInput(state.diff).split("\n").slice(picker.index, picker.index + diffStep).map((line, index) => (
+          {diffLines.length ? diffLines.slice(dialogOffset, dialogOffset + pageRows).map((line, index) => (
             <Text key={index} wrap="truncate-end" color={line.startsWith("+") ? COLORS.success : line.startsWith("-") ? COLORS.error : COLORS.text}>{line || " "}</Text>
           )) : <Text color={COLORS.secondaryText}>No changes reported for this session.</Text>}
-          <Text color={COLORS.secondaryText}>↑↓ / PgUp PgDn scroll · Esc close</Text>
+          <Text wrap="truncate-end" color={COLORS.secondaryText}>↑↓ / PgUp PgDn scroll · Esc close</Text>
         </Box>
       ) : activeDialog ? (
         <Picker title={{ commands: "Commands", sessions: "Sessions", projects: "Projects", models: "Models", agents: "Agents", effort: "Reasoning effort" }[activeDialog]}
           items={filtered} query={picker.query} selectedIndex={selectedIndex}
-          rows={Math.max(1, Math.min(12, rows - 9))} empty="No matches" />
+          rows={Math.max(1, Math.min(12, bodyRows - 5))} empty="No matches" />
       ) : state.sessionId ? (
         <>
           <Chat state={state} columns={columns} rows={viewportRows} scrollOffset={scrollOffset}
-            onScrollLimitChange={setScrollLimit} showToolDetails={showToolDetails} />
+            onScrollLimitChange={updateScrollLimit} showToolDetails={showToolDetails} />
           <Box paddingX={horizontalPadding}>{composer}</Box>
         </>
       ) : (
-        <Welcome projectPath={state.projectPath} columns={columns} rows={Math.max(1, rows - 3)}>{composer}</Welcome>
+        <Welcome columns={columns} rows={bodyRows} composerHeight={composerHeight}>{composer}</Welcome>
       )}
-      <StatusBar status={state.status} running={running} columns={columns} projectPath={state.projectPath}
-        leaderActive={leaderActive} notice={state.error ?? state.notice} />
+      </Box>
+      <StatusBar status={state.status} running={running} columns={columns}
+        leaderActive={leaderActive} inputVisible={!activeDialog && !approval}
+        notice={authError ? "Auth · dicode login (ChatGPT) or check credentials" : state.error ?? state.notice} />
     </Box>
   );
+}
+
+function frameSize(stdout: NodeJS.WriteStream) {
+  // Leave room for Ink's final newline and avoid the terminal's wrap column.
+  return { columns: Math.max(1, (stdout.columns || 80) - 1), rows: Math.max(1, (stdout.rows || 24) - 1) };
+}
+
+function clampOffset(offset: number, limit: number) {
+  return Math.max(0, Math.min(limit, offset));
+}
+
+function isAuthenticationError(message: string | null): boolean {
+  return Boolean(message && /\b(?:401 Unauthorized|(?:HTTP|status(?: code)?[: ]+)\s*401|(?:invalid|missing)[_ ](?:OpenAI )?API[_ ]key|authentication (?:required|failed)|missing (?:bearer authentication|authorization header)|not logged in|please (?:log|sign) in)\b/iu.test(message));
 }
 
 function unquote(value: string) {

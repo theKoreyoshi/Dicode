@@ -42,9 +42,22 @@ describe("mapNotification", () => {
   it("maps file change output deltas", () => {
     const event = mapNotification({
       method: "item/fileChange/outputDelta",
-      params: { threadId: "t1", turnId: "turn1", itemId: "i1", delta: {} },
+      params: { threadId: "t1", turnId: "turn1", itemId: "i1", delta: "patch output" },
     });
-    expect(event.type).toBe("file.changed");
+    expect(event).toMatchObject({ type: "tool.output", itemId: "i1", payload: { delta: "patch output" } });
+  });
+
+  it("maps pinned Codex plan steps and MCP progress notifications", () => {
+    const plan = { threadId: "t1", turnId: "turn1", explanation: null, plan: [{ step: "Read sources", status: "inProgress" }] };
+    expect(mapNotification({ method: "turn/plan/updated", params: plan })).toMatchObject({ type: "plan.updated", payload: plan });
+    expect(mapNotification({
+      method: "item/plan/delta",
+      params: { threadId: "t1", turnId: "turn1", itemId: "plan1", delta: "First step" },
+    })).toMatchObject({ type: "agent.message.delta", itemId: "plan1", payload: { delta: "First step" } });
+    expect(mapNotification({
+      method: "item/mcpToolCall/progress",
+      params: { threadId: "t1", turnId: "turn1", itemId: "i1", message: "Found file" },
+    })).toMatchObject({ type: "tool.output", itemId: "i1", payload: { delta: "Found file\n" } });
   });
 
   it("maps unknown methods to an unknown event without throwing", () => {

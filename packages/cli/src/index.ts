@@ -1,10 +1,10 @@
-import { render } from "ink";
-import { createElement } from "react";
-import { App } from "@dicode/tui";
 import { PRODUCT_NAME, PRODUCT_VERSION } from "@dicode/shared";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { HELP_TEXT, parseArgs } from "./router.js";
+import { login } from "./login.js";
+import { inspectRuntime } from "./inspect-runtime.js";
+import { runTerminal } from "./terminal.js";
 import {
   runDoctor,
   renderDoctorReport,
@@ -34,6 +34,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   if (options.doctor) {
     const checks = await runDoctor();
     process.stdout.write(`${renderDoctorReport(checks)}\n`);
+    if (checks.some((check) => !check.ok)) process.exitCode = 1;
+    return;
+  }
+  if (options.login) {
+    await login();
+    return;
+  }
+  if (options.inspect) {
+    await inspectRuntime(options.inspect, options.cwd);
     return;
   }
   if (options.paths) {
@@ -47,7 +56,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
-  render(createElement(App, { cwd: options.cwd, resume: options.resume }), { exitOnCtrlC: false });
+  try {
+    await runTerminal(options.cwd, options.resume);
+  } catch (error) {
+    process.stderr.write(`Dicode terminal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
 }
 
 export { parseArgs, HELP_TEXT };

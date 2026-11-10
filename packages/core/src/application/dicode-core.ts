@@ -126,6 +126,14 @@ export class DicodeCore {
     this.capabilityManager.setFromAdapter(this.adapter.getCapabilities(), adapterMethodSet());
 
     this.unsubscribeAdapterEvent = this.adapter.onEvent((event) => {
+      if (event.type === "approval.expired" && event.sessionId) {
+        const session = this.sessionManager.findByThreadId(event.sessionId);
+        const requestId = (event.payload as { requestId?: unknown })?.requestId;
+        if (session && (typeof requestId === "string" || typeof requestId === "number")) {
+          this.approvalManager.expireRequest(session.id, requestId);
+        }
+        return;
+      }
       if (event.type === "turn.completed" && event.turnId) {
         const ref = this.eventManager.getTurnRef(event.turnId);
         if (ref) this.approvalManager.expirePending(new Set([ref.sessionId]));

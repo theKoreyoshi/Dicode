@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CodexClient } from "@dicode/codex-adapter";
-import { PRODUCT_VERSION } from "@dicode/shared";
-import { getBundledRuntimeDir, getDataDir } from "@dicode/shared";
+import { BUNDLED_CODEX_EXECUTABLE, BUNDLED_CODEX_FILES, BUNDLED_CODEX_VERSION, PRODUCT_VERSION, getBundledRuntimeDir, getDataDir, isPackagedDicode } from "@dicode/shared";
 import { Database } from "@dicode/core";
 
 export interface DoctorCheck {
@@ -28,13 +27,17 @@ export async function runDoctor(): Promise<DoctorCheck[]> {
 
   const runtimeDir = defaultRuntimeDir();
   const bundledRuntime = checkBundledRuntime(runtimeDir);
-  const appServer = await checkAppServer();
-  checks.push(!existsSync(join(runtimeDir, "codex.exe")) && appServer.ok
-    ? { name: "Codex Runtime", ok: true, detail: "Using an external Codex runtime." }
+  const packaged = isPackagedDicode();
+  const { appServer, account } = packaged && !bundledRuntime.ok
+    ? { appServer: { name: "App Server Startup", ok: false, detail: "Reinstall or re-extract Dicode and try again." }, account: undefined }
+    : await inspectAppServer(15_000, true);
+  checks.push(!packaged && !existsSync(join(runtimeDir, BUNDLED_CODEX_EXECUTABLE)) && appServer.ok
+    ? { name: "Codex Runtime", ok: true, detail: "Development runtime." }
     : bundledRuntime);
   const sqlite = checkSqlite();
   checks.push(checkUserData());
   checks.push(appServer);
+  if (account) checks.push(account);
   checks.push(sqlite);
   return checks;
 }
@@ -65,20 +68,28 @@ export function checkDicodeVersion(): DoctorCheck {
 }
 
 export function checkBundledRuntime(dir = defaultRuntimeDir()): DoctorCheck {
-  const codex = join(dir, "codex.exe");
-  if (!existsSync(codex)) {
+  const name = "Bundled Codex Runtime";
+  const manifest = readManifest(join(dir, "version.json"));
+  if (!manifest || manifest.codexVersion !== BUNDLED_CODEX_VERSION || manifest.platform !== "windows-x64") {
     return {
-      name: "Bundled Codex Runtime",
+      name,
       ok: false,
-      detail: `Missing ${codex}. Install Codex or set DICODE_CODEX_EXE to the full path of codex.exe.`,
+      detail: `Expected Codex ${BUNDLED_CODEX_VERSION} (windows-x64) in ${dir}. Reinstall or re-extract Dicode.`,
     };
   }
-  const manifest = readManifest(join(dir, "version.json"));
-  const integrity = verifyIntegrity(codex, manifest?.files?.["codex.exe"]);
+  for (const path of BUNDLED_CODEX_FILES) {
+    const expected = manifest.files?.[path];
+    if (typeof expected?.sizeBytes !== "number" || expected.sizeBytes <= 0 ||
+        typeof expected.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(expected.sha256)) {
+      return { name, ok: false, detail: `Missing integrity record for ${path}.` };
+    }
+    const integrity = verifyIntegrity(join(dir, path), expected);
+    if (!integrity.ok) return { name, ok: false, detail: `${path}: ${integrity.reason}` };
+  }
   return {
-    name: "Bundled Codex Runtime",
-    ok: integrity.ok,
-    detail: integrity.ok ? `${codex} (${manifest?.codexVersion ?? "unknown"})` : integrity.reason,
+    name,
+    ok: true,
+    detail: `Codex ${manifest.codexVersion} at ${dir}. Runtime files verified.`,
   };
 }
 
@@ -105,15 +116,36 @@ export function checkUserData(): DoctorCheck {
 }
 
 export async function checkAppServer(timeoutMs = 15_000): Promise<DoctorCheck> {
-  const client = new CodexClient({ defaultTimeoutMs: timeoutMs });
+  return (await inspectAppServer(timeoutMs, false)).appServer;
+}
+
+async function inspectAppServer(timeoutMs: number, checkAccount: boolean): Promise<{ appServer: DoctorCheck; account?: DoctorCheck }> {
+  let client: CodexClient | undefined;
   try {
+    client = new CodexClient({ defaultTimeoutMs: timeoutMs });
     await client.start();
     await client.healthCheck(timeoutMs);
-    await client.stop();
-    return { name: "App Server Startup", ok: true, detail: "initialize + model/list + JSON-RPC OK" };
+    const appServer = { name: "App Server Startup", ok: true, detail: "initialize + model/list + JSON-RPC OK" };
+    if (!checkAccount) return { appServer };
+    try {
+      const { account, requiresOpenaiAuth } = await client.readAccount();
+      return {
+        appServer,
+        account: {
+          name: "Codex Authentication",
+          ok: Boolean(account) || !requiresOpenaiAuth,
+          detail: account ? "Account configured." : requiresOpenaiAuth
+            ? "Run dicode login to sign in."
+            : "The configured provider does not require OpenAI sign-in.",
+        },
+      };
+    } catch {
+      return { appServer, account: { name: "Codex Authentication", ok: false, detail: "Could not read account status." } };
+    }
   } catch (error) {
-    await client.stop().catch(() => {});
-    return { name: "App Server Startup", ok: false, detail: (error as Error).message };
+    return { appServer: { name: "App Server Startup", ok: false, detail: (error as Error).message } };
+  } finally {
+    await client?.stop().catch(() => undefined);
   }
 }
 
@@ -139,6 +171,7 @@ export function readManifest(path: string): RuntimeVersionManifest | null {
 export function verifyIntegrity(file: string, expected?: { sha256?: string; sizeBytes?: number }): { ok: boolean; reason?: string } {
   try {
     const stat = statSync(file);
+    if (!stat.isFile()) return { ok: false, reason: "Expected a regular file." };
     if (expected?.sizeBytes && stat.size !== expected.sizeBytes) {
       return { ok: false, reason: `size mismatch: ${stat.size} != ${expected.sizeBytes}` };
     }
@@ -154,7 +187,16 @@ export function verifyIntegrity(file: string, expected?: { sha256?: string; size
 
 export function sha256File(file: string): string {
   const hash = createHash("sha256");
-  hash.update(readFileSync(file));
+  const descriptor = openSync(file, "r");
+  const chunk = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let bytes: number;
+    while ((bytes = readSync(descriptor, chunk, 0, chunk.length, null)) > 0) {
+      hash.update(chunk.subarray(0, bytes));
+    }
+  } finally {
+    closeSync(descriptor);
+  }
   return hash.digest("hex");
 }
 
