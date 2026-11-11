@@ -1,34 +1,30 @@
 import { Box, Text } from "ink";
-import type { SessionInfo } from "@dicode/core";
-import type { UiTokenUsage, UiTool } from "../state/ui-store.js";
+import { PRODUCT_VERSION } from "@dicode/shared";
+import type { UiTokenUsage } from "../state/ui-store.js";
 import { COLORS } from "../theme/colors.js";
 import { cleanInput } from "../utils/composer.js";
+import { contextUsagePercent, formatContextUsage } from "../utils/token-usage.js";
 
 interface SidebarProps {
-  session?: SessionInfo;
+  sessionTitle: string | null;
   projectName: string | null;
   projectPath: string | null;
-  tools: UiTool[];
   diff: string | null;
   tokenUsage: UiTokenUsage | null;
-  columns: number;
   rows: number;
 }
 
-const compactNumber = new Intl.NumberFormat("en", { notation: "compact" });
-
-export function Sidebar({ session, projectName, projectPath, tools, diff, tokenUsage, columns, rows }: SidebarProps) {
+export function Sidebar({ sessionTitle, projectName, projectPath, diff, tokenUsage, rows }: SidebarProps) {
   const { additions, deletions, files } = summarizeDiff(diff);
-  const runningTools = tools.filter((tool) => tool.status === "running").length;
-  const context = tokenUsage?.modelContextWindow;
+  const contextPercent = tokenUsage ? contextUsagePercent(tokenUsage) : null;
 
   return (
     <Box
-      width={columns}
+      width={42}
       height={rows}
       flexShrink={0}
       flexDirection="column"
-      paddingLeft={1}
+      paddingLeft={2}
       borderStyle="single"
       borderTop={false}
       borderBottom={false}
@@ -36,29 +32,19 @@ export function Sidebar({ session, projectName, projectPath, tools, diff, tokenU
       borderColor={COLORS.border}
       overflow="hidden"
     >
-      <Text bold color={COLORS.text} wrap="truncate-end">{cleanInput(session?.title || projectName || "Session").replace(/\s+/gu, " ")}</Text>
-      {projectPath && <Text color={COLORS.secondaryText} wrap="truncate-start">{cleanInput(projectPath).replace(/\n/gu, " ")}</Text>}
-      {tokenUsage && rows > 4 && (
-        <Text color={COLORS.secondaryText} wrap="truncate-end">
-          {compactNumber.format(tokenUsage.totalTokens)} tokens
-          {context ? ` · ${Math.round(tokenUsage.totalTokens / context * 100)}% context` : ""}
-        </Text>
-      )}
-      {rows > 7 && (
+      <Text bold color={COLORS.text} wrap="truncate-end">{cleanInput(sessionTitle || projectName || "Session").replace(/\s+/gu, " ")}</Text>
+      {tokenUsage && rows > 5 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold color={COLORS.text}>Activity</Text>
-          {tools.length ? (
-            <Text color={COLORS.secondaryText} wrap="truncate-end">
-              {tools.length} tool {tools.length === 1 ? "call" : "calls"}{runningTools ? ` · ${runningTools} running` : ""}
-            </Text>
-          ) : (
-            <Text color={COLORS.secondaryText}>No tools used</Text>
-          )}
+          <Text bold color={COLORS.text}>Context</Text>
+          <Text color={COLORS.secondaryText} wrap="truncate-end">
+            {formatContextUsage(tokenUsage)}
+          </Text>
+          {contextPercent !== null && <Text color={COLORS.secondaryText}>active context</Text>}
         </Box>
       )}
-      {rows > 11 && (
+      {rows > 17 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold color={COLORS.text}>Turn changes</Text>
+          <Text bold color={COLORS.text}>Changes</Text>
           {diff ? (
             <Text color={COLORS.secondaryText} wrap="truncate-end">
               {files > 0 && `${files} ${files === 1 ? "file" : "files"} · `}
@@ -71,11 +57,11 @@ export function Sidebar({ session, projectName, projectPath, tools, diff, tokenU
           )}
         </Box>
       )}
-      {rows > 13 && (
-        <Box marginTop={1}>
-          <Text color={COLORS.secondaryText} wrap="truncate-end">Ctrl+X B Hide sidebar</Text>
-        </Box>
+      {rows > 22 && (
+        <Box flexGrow={1} />
       )}
+      {projectPath && <Text color={COLORS.text} wrap="truncate-start">{cleanInput(projectPath).replace(/\n/gu, " ")}</Text>}
+      <Text color={COLORS.secondaryText}><Text color={COLORS.success}>●</Text> Dicode {PRODUCT_VERSION}</Text>
     </Box>
   );
 }

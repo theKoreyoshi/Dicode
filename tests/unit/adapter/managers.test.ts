@@ -30,6 +30,17 @@ describe("CodexThreadManager", () => {
     expect(request).toHaveBeenCalledWith("thread/resume", { threadId: "th1", excludeTurns: true });
   });
 
+  it("sets Dicode's assistant identity through the App Server thread instructions", async () => {
+    const request = vi.fn().mockResolvedValue({ thread: { id: "th1" } });
+    const manager = new CodexThreadManager(request);
+    await manager.start({ developerInstructions: "You are Dicode." });
+    expect(request).toHaveBeenCalledWith("thread/start", { developerInstructions: "You are Dicode." });
+    await manager.resume("th1", { developerInstructions: "You are Dicode." });
+    expect(request).toHaveBeenCalledWith("thread/resume", {
+      threadId: "th1", excludeTurns: true, developerInstructions: "You are Dicode.",
+    });
+  });
+
   it("reports the effective provider and model instead of saved thread summary values", async () => {
     const request = vi.fn().mockResolvedValue({
       thread: { id: "th1", modelProvider: "saved-provider", model: "saved-model" },
@@ -82,6 +93,16 @@ describe("CodexTurnManager", () => {
       },
     }));
     expect(manager.getActiveTurnId("th1")).toBeUndefined();
+  });
+
+  it("requests full access only when the user selects that permission mode", async () => {
+    const request = vi.fn().mockResolvedValue({ turn: { id: "turn1", status: "inProgress" } });
+    const manager = new CodexTurnManager(request);
+    await manager.start("th1", { text: "run command", permissionMode: "full" });
+    expect(request).toHaveBeenCalledWith("turn/start", expect.objectContaining({
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "dangerFullAccess" },
+    }));
   });
 
   it("steers using the tracked expectedTurnId", async () => {

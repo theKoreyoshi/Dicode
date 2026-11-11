@@ -6,7 +6,7 @@ import { createId } from "../utils/id.js";
 import { nowMs } from "../utils/time.js";
 import type { CoreEvent, CoreEventType } from "./event-types.js";
 import { readMessagePresentation } from "./message-presentation.js";
-import { readToolPresentation } from "./tool-presentation.js";
+import { readToolInput, readToolPresentation } from "./tool-presentation.js";
 
 export type CoreEventListener = (event: CoreEvent) => void;
 
@@ -133,11 +133,25 @@ export class EventManager {
         return null;
 
       case "item.started":
+        if (isReasoningItem(payload)) return null;
         if (!isAgentItem(payload)) return null;
         this.getAgentBuffer(base, payload.item as Record<string, unknown>);
         return { ...base, type: "message.started", payload };
 
       case "item.completed":
+        if (isReasoningItem(payload)) {
+          const startedAt = finiteNumber(payload.startedAtMs);
+          const completedAt = finiteNumber(payload.completedAtMs);
+          const item = payload.item as Record<string, unknown> | undefined;
+          const itemStartedAt = finiteNumber(item?.startedAtMs);
+          const itemCompletedAt = finiteNumber(item?.completedAtMs);
+          const durationMs = startedAt !== undefined && completedAt !== undefined
+            ? Math.max(0, completedAt - startedAt)
+            : itemStartedAt !== undefined && itemCompletedAt !== undefined
+              ? Math.max(0, itemCompletedAt - itemStartedAt)
+              : undefined;
+          return durationMs === undefined ? null : { ...base, type: "thought.completed", payload: { durationMs } };
+        }
         if (!isAgentItem(payload)) return null;
         this.getAgentBuffer(base);
         if (base.itemId) this.flushAgentMessage(base.itemId, payload.item as Record<string, unknown>);
@@ -293,7 +307,7 @@ export class EventManager {
       toolName: stringOr(label, stringOr(item?.type, "tool")),
       toolType: stringOr(item?.type, "tool"),
       status: "running",
-      input: (item?.arguments as Record<string, unknown>) ?? {},
+      input: readToolInput(item) ?? {},
       output: null,
       durationMs: null,
       createdAt: event.timestamp,
@@ -408,6 +422,14 @@ export class EventManager {
 function isAgentItem(payload: Record<string, unknown>): boolean {
   const item = payload.item as Record<string, unknown> | undefined;
   return item?.type === "agentMessage" || item?.type === "plan";
+}
+
+function isReasoningItem(payload: Record<string, unknown>): boolean {
+  return (payload.item as Record<string, unknown> | undefined)?.type === "reasoning";
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function stringOr(value: unknown, fallback: string): string {

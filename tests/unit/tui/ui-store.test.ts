@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CoreEvent } from "@dicode/core";
 import { createInitialUiState, mergeStreamingDeltas, uiReducer, type UiState } from "@dicode/tui";
+import { readTokenUsage } from "../../../packages/tui/src/state/ui-store.js";
 
 function receive(state: UiState, type: CoreEvent["type"], payload: unknown = {}, fields: Partial<CoreEvent> = {}) {
   return uiReducer(state, {
@@ -55,9 +56,14 @@ describe("uiReducer", () => {
   });
 
   it("keeps tool output attached to the matching item and applies the final result", () => {
-    let state = receive(active(), "tool.started", { item: { type: "commandExecution", command: "npm test" } }, { itemId: "shell" });
+    let state = receive(active(), "tool.started", {
+      item: { type: "commandExecution", command: "npm test", cwd: "C:\\work\\repo", source: "agent" },
+    }, { itemId: "shell" });
     state = receive(state, "tool.output", { delta: "checking" }, { itemId: "shell", timestamp: 120 });
-    expect(state.tools[0]).toMatchObject({ label: "npm test", status: "running", output: "checking" });
+    expect(state.tools[0]).toMatchObject({
+      label: "npm test", status: "running", output: "checking",
+      input: { command: "npm test", cwd: "C:\\work\\repo" },
+    });
     state = receive(state, "tool.completed", { item: { aggregatedOutput: "failed output", exitCode: 1 } }, { itemId: "shell", timestamp: 150 });
     expect(state.tools).toMatchObject([{ id: "shell", timestamp: 100, status: "failed", output: "failed output", exitCode: 1 }]);
   });
@@ -76,5 +82,15 @@ describe("uiReducer", () => {
 describe("mergeStreamingDeltas", () => {
   it("concatenates deltas in order", () => {
     expect(mergeStreamingDeltas(["a", "b", "c"])).toBe("abc");
+  });
+});
+
+describe("readTokenUsage", () => {
+  it("uses the latest context window usage instead of cumulative session tokens", () => {
+    expect(readTokenUsage({ tokenUsage: {
+      total: { totalTokens: 180_000 },
+      last: { totalTokens: 18_000 },
+      modelContextWindow: 40_000,
+    } })).toEqual({ contextTokens: 18_000, modelContextWindow: 40_000 });
   });
 });

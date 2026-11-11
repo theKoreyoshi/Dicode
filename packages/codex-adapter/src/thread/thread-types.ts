@@ -27,11 +27,13 @@ export interface StartThreadOptions {
   modelProvider?: string;
   sandbox?: SandboxMode;
   approvalPolicy?: AskForApproval;
+  developerInstructions?: string;
 }
 
 export interface ResumeThreadOptions {
   cwd?: string;
   model?: string;
+  developerInstructions?: string;
 }
 
 export interface ListThreadOptions {

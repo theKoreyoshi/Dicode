@@ -34,6 +34,23 @@ export function readToolPresentation(item: unknown, progress?: string | null): {
   return { label, output: output?.slice(-16_000) };
 }
 
+/** The schema keeps some invocation fields beside `arguments` (not inside it). */
+export function readToolInput(item: unknown): Record<string, unknown> | undefined {
+  const value = asRecord(item);
+  const input: Record<string, unknown> = {};
+  if (value.arguments !== undefined && value.arguments !== null) input.arguments = value.arguments;
+  for (const key of ["command", "cwd", "source", "commandActions", "server", "namespace", "tool", "query", "path", "prompt", "model", "reasoningEffort"]) {
+    if (value[key] !== undefined && value[key] !== null) input[key] = value[key];
+  }
+  if (Array.isArray(value.changes)) {
+    input.files = value.changes.map((change) => {
+      const entry = asRecord(change);
+      return { path: entry.path, kind: entry.kind };
+    });
+  }
+  return Object.keys(input).length ? input : undefined;
+}
+
 function renderContent(content: unknown): string | undefined {
   if (!Array.isArray(content)) return undefined;
   const output = content.map((part) => {

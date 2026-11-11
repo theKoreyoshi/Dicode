@@ -303,7 +303,7 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
         }
         if (!model) throw new Error("Select a model before changing agent mode.");
       }
-      const prompt: MessageInput = { text, model, effort, mode };
+      const prompt: MessageInput = { text, model, effort, mode, permissionMode: config.permissionMode };
       if (running && options.queue) {
         if (queued.has(sessionId)) {
           dispatch({ type: "SET_NOTICE", message: "A prompt is already queued for this session." });

@@ -14,6 +14,7 @@ export function defaultConfig(): DicodeConfig {
       defaultModel: null,
       customModel: null,
       reasoningEffort: null,
+      permissionMode: "default",
       maxConcurrentSessions: 3,
     },
     runtime: {

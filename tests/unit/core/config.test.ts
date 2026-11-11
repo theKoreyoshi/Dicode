@@ -28,6 +28,7 @@ describe("ConfigManager", () => {
     const config = manager.load();
     expect(config.ui.theme).toBe("dicode-blue");
     expect(config.agent.maxConcurrentSessions).toBe(3);
+    expect(config.agent.permissionMode).toBe("default");
   });
 
   it("merges user values over defaults", () => {
@@ -47,6 +48,14 @@ describe("ConfigManager", () => {
     manager.update({ agent: { defaultModel: "deepseek-v4-pro" } });
     const reloaded = new ConfigManager({ configPath: path }).load();
     expect(reloaded.agent.defaultModel).toBe("deepseek-v4-pro");
+  });
+
+  it("persists the selected permission mode", () => {
+    const path = configPath();
+    const manager = new ConfigManager({ configPath: path });
+    manager.load();
+    manager.update({ agent: { permissionMode: "full" } });
+    expect(new ConfigManager({ configPath: path }).load().agent.permissionMode).toBe("full");
   });
 
   it("persists custom model metadata separately from the native model preference", () => {

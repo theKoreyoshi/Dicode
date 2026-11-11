@@ -3,18 +3,19 @@
  * it degrades gracefully.
  */
 export const COLORS = {
-  background: "#080E1C",
-  primaryBackground: "#0D1629",
-  secondaryBackground: "#111F38",
-  primaryBlue: "#258BFF",
-  accentBlue: "#43C7FF",
-  text: "#E1EAF8",
-  secondaryText: "#91A8C9",
-  border: "#263D61",
-  success: "#35C98A",
-  warning: "#E9B65B",
-  error: "#F16B78",
-  dim: "#5A6B87",
+  background: "#080808",
+  primaryBackground: "#1F1F1F",
+  secondaryBackground: "#292929",
+  primaryBlue: "#5B9BFF",
+  accentBlue: "#5B9BFF",
+  text: "#E8E8E8",
+  secondaryText: "#858585",
+  border: "#363636",
+  success: "#7FC99A",
+  warning: "#FFB36B",
+  error: "#F17777",
+  dim: "#777777",
+  commandSelected: "#FFB58F",
 } as const;
 
 export type ColorKey = keyof typeof COLORS;

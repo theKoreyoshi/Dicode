@@ -6,6 +6,7 @@ import { SessionError, UnsupportedCapabilityError } from "../errors/core-errors.
 import type { SessionRepository } from "../storage/repositories.js";
 import type { SessionStatus } from "../storage/storage-types.js";
 import type { StateManager } from "../state/state-manager.js";
+import { DICODE_DEVELOPER_INSTRUCTIONS } from "../application/dicode-instructions.js";
 import { createId } from "../utils/id.js";
 import { nowMs } from "../utils/time.js";
 import type { CreateSessionOptions, ListSessionsOptions, SessionInfo } from "./session-types.js";
@@ -28,6 +29,7 @@ export class SessionManager {
     const thread = await this.adapter.createThread({
       cwd,
       model: customModel?.model ?? options.model,
+      developerInstructions: DICODE_DEVELOPER_INSTRUCTIONS,
     });
 
     const now = nowMs();
@@ -92,6 +94,7 @@ export class SessionManager {
     await this.adapter.resumeThread(session.codexThreadId, {
       cwd: session.cwd,
       ...(session.customModel ? { model: session.model ?? session.customModel.model } : {}),
+      developerInstructions: DICODE_DEVELOPER_INSTRUCTIONS,
     });
     this.loadedSessions.add(session.id);
   }

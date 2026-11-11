@@ -9,4 +9,5 @@ export interface MessageInput {
   model?: string;
   effort?: string;
   mode?: "default" | "plan";
+  permissionMode?: "default" | "full";
 }

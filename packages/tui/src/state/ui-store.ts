@@ -1,4 +1,4 @@
-import { readMessagePresentation, readToolPresentation, type ApprovalInfo, type CoreEvent, type MessageRecord, type ModelInfo, type SessionInfo, type ToolExecutionRecord } from "@dicode/core";
+import { readMessagePresentation, readToolInput, readToolPresentation, type ApprovalInfo, type CoreEvent, type MessageRecord, type ModelInfo, type SessionInfo, type ToolExecutionRecord } from "@dicode/core";
 
 export interface UiMessage extends Pick<MessageRecord, "phase" | "kind" | "incomplete"> {
   id: string;
@@ -12,8 +12,10 @@ export interface UiMessage extends Pick<MessageRecord, "phase" | "kind" | "incom
 
 export interface UiTool {
   id: string;
+  turnId?: string;
   type: string;
   label: string;
+  input?: Record<string, unknown>;
   status: "running" | "completed" | "failed";
   timestamp: number;
   output?: string;
@@ -21,8 +23,15 @@ export interface UiTool {
   exitCode?: number;
 }
 
+export interface UiThought {
+  id: string;
+  turnId?: string;
+  timestamp: number;
+  durationMs: number;
+}
+
 export interface UiTokenUsage {
-  totalTokens: number;
+  contextTokens: number;
   modelContextWindow: number | null;
 }
 
@@ -43,6 +52,7 @@ export interface UiState {
   sessions: SessionInfo[];
   messages: UiMessage[];
   tools: UiTool[];
+  thoughts: UiThought[];
   diff: string | null;
   plan: UiPlan | null;
   tokenUsage: UiTokenUsage | null;
@@ -91,6 +101,7 @@ export function createInitialUiState(): UiState {
     sessions: [],
     messages: [],
     tools: [],
+    thoughts: [],
     diff: null,
     plan: null,
     tokenUsage: null,
@@ -123,6 +134,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
         sessionId: action.sessionId,
         messages: view?.messages.map(messageToUi) ?? [],
         tools: view?.tools.map(toolToUi) ?? [],
+        thoughts: [],
         diff: view?.diff ?? null,
         plan: view?.plan ?? null,
         tokenUsage: view?.tokenUsage ?? null,
@@ -192,6 +204,14 @@ function reduceCoreEvent(state: UiState, event: CoreEvent): UiState {
     case "message.delta":
     case "message.completed":
       return { ...state, messages: updateAssistantMessage(state.messages, event) };
+    case "thought.completed": {
+      const durationMs = record(event.payload).durationMs;
+      if (typeof durationMs !== "number" || !Number.isFinite(durationMs)) return state;
+      return {
+        ...state,
+        thoughts: [...state.thoughts, { id: event.itemId ?? event.id, turnId: event.turnId, timestamp: event.timestamp, durationMs }],
+      };
+    }
     case "tool.started":
     case "tool.output":
     case "tool.completed":
@@ -312,8 +332,10 @@ function updateTool(tools: UiTool[], event: CoreEvent): UiTool[] {
   const output = presentation.output ?? (existing?.output ?? "") + (typeof payload.delta === "string" ? payload.delta : "");
   const updated: UiTool = {
     id,
+    turnId: event.turnId ?? existing?.turnId,
     type,
     label: presentation.label ?? existing?.label ?? type,
+    input: readToolInput(item) ?? existing?.input,
     status: done ? failed ? "failed" : "completed" : existing?.status ?? "running",
     timestamp: existing?.timestamp ?? event.timestamp,
     output: output.slice(-16_000),
@@ -326,8 +348,10 @@ function updateTool(tools: UiTool[], event: CoreEvent): UiTool[] {
 function toolToUi(tool: ToolExecutionRecord): UiTool {
   return {
     id: tool.itemId ?? tool.id,
+    turnId: tool.turnId ?? undefined,
     type: tool.toolType,
     label: tool.toolName,
+    input: tool.input,
     status: tool.status,
     timestamp: tool.createdAt,
     output: tool.output ?? undefined,
@@ -356,9 +380,9 @@ export function readPlan(payload: unknown, timestamp: number): UiPlan | null {
 
 export function readTokenUsage(payload: unknown): UiTokenUsage | null {
   const usage = record(record(payload).tokenUsage);
-  const totalTokens = record(usage.total).totalTokens;
-  return typeof totalTokens === "number" ? {
-    totalTokens,
+  const contextTokens = record(usage.last).totalTokens;
+  return typeof contextTokens === "number" && Number.isFinite(contextTokens) ? {
+    contextTokens,
     modelContextWindow: typeof usage.modelContextWindow === "number" ? usage.modelContextWindow : null,
   } : null;
 }

@@ -25,6 +25,13 @@ describe("resolveKeyAction", () => {
     expect(resolveKeyAction({ input: "p", key: { ctrl: true } }, ctx)).toBe("commandPalette");
   });
 
+  it("cycles session tabs with Ctrl+Tab and Ctrl+Shift+Tab", () => {
+    expect(resolveKeyAction({ key: { ctrl: true, tab: true } }, ctx)).toBe("nextSession");
+    expect(resolveKeyAction({ key: { ctrl: true, shift: true, tab: true } }, ctx)).toBe("previousSession");
+    expect(resolveKeyAction({ input: "\u001b[9;5u" }, ctx)).toBe("nextSession");
+    expect(resolveKeyAction({ input: "\u001b[9;6u" }, ctx)).toBe("previousSession");
+  });
+
   it("maps escape to close when a modal is open", () => {
     expect(resolveKeyAction({ key: { escape: true } }, { ...ctx, modalOpen: true })).toBe("close");
   });

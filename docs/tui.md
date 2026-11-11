@@ -4,14 +4,45 @@ Run `dicode` in a Windows terminal, then type a request and press Enter.
 Dicode creates a Codex thread on the first accepted prompt. Sessions, messages
 and tool activity are stored in the Dicode user data directory.
 
-The prompt has its own border and a separate settings row for agent mode, model,
-and reasoning effort. The transcript scrolls above the prompt. Wide terminals
-also show a sidebar with context usage and recent changes.
+The TUI layout is based on a read-only review of OpenCode source at commit
+`d4ea024`. Home centers the Dicode wordmark and shared composer, with the
+project path and product version in the bottom row. A session uses a
+headerless workbench: transcript and composer in the main column, plus a
+42-column context pane on terminals at least 100 columns wide. The footer stays
+under the main column and shows the project path, available token usage, and
+command shortcut. Session switching remains available through the picker and
+keyboard shortcuts; there is no permanent session rail.
 
-The default transcript shows user prompts, tool calls and their status, the
-proposed plan, and the final answer. `/tools` expands command output and
-intermediate messages. Use `/diff` to inspect file changes. Message phases and
-tool status come from the [Codex App Server](https://learn.chatgpt.com/docs/app-server).
+Typing `/` opens command completion directly above the composer. It presents
+the actual Dicode slash commands and their descriptions in two columns, with
+the selected row highlighted. Ctrl+P remains the searchable command palette.
+Dicode keeps its own Ink implementation and routes agent behavior through
+Codex App Server.
+
+The composer and submitted prompts use the same left rail. While a turn runs,
+the footer animates a one-cell spinner with the current activity (`Thinking…`,
+`Running command…`, and related states) and `esc interrupt`. Tool history stays
+muted and indented: completed calls are grouped into category counts, while
+`/tools` expands recorded arguments, outputs, exit codes, and durations.
+Message phases and tool records come from Codex events. Reasoning text is
+discarded; when Codex supplies item lifecycle timestamps, the transcript shows
+only the elapsed Thought duration. Dicode does not synthesize model costs or
+LSP status. Use `/diff` to inspect file changes.
+
+New and resumed threads receive Dicode's developer identity instructions, so
+the assistant identifies itself as Dicode while Codex App Server remains the
+execution runtime. `/permissions` selects either the user's Codex defaults or
+`Allow all · danger-full-access` for future turns. The latter disables the
+sandbox and approval policy and is marked high risk. Context usage reads the
+latest active context from App Server (`last.totalTokens`), not cumulative
+session tokens; its percentage follows Codex's 12,000-token reserved baseline.
+Use `/permissions` to change the mode. The selection is stored in Dicode's
+user configuration and applies to subsequently started turns.
+
+Enter submits, Shift+Enter or Ctrl+J inserts a newline, Esc interrupts the active
+turn, Ctrl+P opens the command palette, Ctrl+O opens session search, and
+Ctrl+Tab / Ctrl+Shift+Tab move between sessions. Ctrl+X opens the leader
+key layer for new session, session list, model, and context pane commands.
 
 Dicode restores the shell screen on exit. Adapter diagnostics are saved in
 `%APPDATA%\Dicode\logs\adapter.log`.

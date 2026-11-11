@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runtimePin, sha256, writeRuntimeManifest } from "./generate-runtime-manifest.mjs";
 
-const [archiveArg, compiler = "ISCC.exe"] = process.argv.slice(2);
-if (!archiveArg) {
-  throw new Error(`Usage: npm run package:windows -- <Codex release tar.gz> [ISCC.exe]\nCodex archive: ${runtimePin.source}`);
+const [runtimeSourceArg, compiler = "ISCC.exe"] = process.argv.slice(2);
+if (!runtimeSourceArg) {
+  throw new Error(`Usage: npm run package:windows -- <Codex release tar.gz | verified runtime directory> [ISCC.exe]\nCodex archive: ${runtimePin.source}`);
 }
 if (process.platform !== "win32" || process.arch !== "x64") {
   throw new Error("The Windows package build requires a Windows x64 Node.js runtime.");
@@ -14,8 +14,11 @@ if (process.platform !== "win32" || process.arch !== "x64") {
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const releaseDir = resolve(root, process.env.DICODE_RELEASE_DIR || "release");
-const archive = resolve(archiveArg);
-if (await sha256(archive) !== runtimePin.archiveSha256) throw new Error("Codex release archive SHA-256 does not match the pinned package.");
+const runtimeSource = resolve(runtimeSourceArg);
+const runtimeSourceIsDirectory = existsSync(runtimeSource) && statSync(runtimeSource).isDirectory();
+if (!runtimeSourceIsDirectory && await sha256(runtimeSource) !== runtimePin.archiveSha256) {
+  throw new Error("Codex release archive SHA-256 does not match the pinned package.");
+}
 
 mkdirSync(releaseDir, { recursive: true });
 const workDir = mkdtempSync(join(releaseDir, ".windows-package-"));
@@ -23,8 +26,16 @@ try {
   const payload = join(workDir, "payload");
   const runtimeDir = join(payload, "runtime", "codex");
   mkdirSync(runtimeDir, { recursive: true });
-  // Keep the official coding-runtime layout. The optional voice subtree is outside Dicode's scope.
-  run("tar.exe", ["-xf", archive, "-C", runtimeDir, ...Object.keys(runtimePin.files)]);
+  if (runtimeSourceIsDirectory) {
+    for (const name of Object.keys(runtimePin.files)) {
+      const destination = join(runtimeDir, name);
+      mkdirSync(dirname(destination), { recursive: true });
+      copyFileSync(join(runtimeSource, name), destination);
+    }
+  } else {
+    // Keep the official coding-runtime layout. The optional voice subtree is outside Dicode's scope.
+    run("tar.exe", ["-xf", runtimeSource, "-C", runtimeDir, ...Object.keys(runtimePin.files)]);
+  }
   const { version } = readJson(join(root, "package.json"));
   await writeRuntimeManifest(runtimeDir, version);
 

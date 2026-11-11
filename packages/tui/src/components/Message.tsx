@@ -20,12 +20,14 @@ export interface TranscriptLine {
 
 const messageCache = new WeakMap<UiMessage, TranscriptLine[]>();
 const wrappedLines = new WeakMap<TranscriptLine, { width: number; lines: TranscriptLine[] }>();
-const toolCategories: Record<string, string> = {
-  commandExecution: "Shell",
-  fileChange: "Files",
-  mcpToolCall: "MCP",
-  webSearch: "Search",
-  collabAgentToolCall: "Agent",
+export const toolCategories: Record<string, string> = {
+  commandExecution: "command",
+  fileRead: "read",
+  fileChange: "edit",
+  mcpToolCall: "MCP call",
+  webSearch: "search",
+  collabAgentToolCall: "task",
+  dynamicToolCall: "tool",
 };
 
 export function messageLines(message: UiMessage): TranscriptLine[] {
@@ -35,10 +37,12 @@ export function messageLines(message: UiMessage): TranscriptLine[] {
   const content = cleanText(message.content);
   const lines: TranscriptLine[] = [];
   if (message.role === "user") {
-    lines.push(
-      { text: "You", color: COLORS.primaryBlue, bold: true, indent: "│ ", background: COLORS.primaryBackground },
-      { text: content, indent: "│ ", background: COLORS.primaryBackground },
-    );
+    lines.push({
+      text: content,
+      indent: "┃ ",
+      background: COLORS.primaryBackground,
+      color: COLORS.text,
+    });
   } else if (content || message.streaming) {
     const heading = message.incomplete ? "Incomplete response"
       : message.kind === "plan" ? "Proposed plan"
@@ -56,26 +60,45 @@ export function messageLines(message: UiMessage): TranscriptLine[] {
 }
 
 export function toolLines(tool: UiTool, showDetails: boolean): TranscriptLine[] {
-  const status = {
-    running: { icon: "◌", color: COLORS.accentBlue },
-    completed: { icon: "✓", color: COLORS.success },
-    failed: { icon: "✗", color: COLORS.error },
-  }[tool.status];
   const duration = tool.durationMs === undefined ? "" : ` · ${formatDuration(tool.durationMs)}`;
   const exit = tool.exitCode === undefined ? "" : ` · exit ${tool.exitCode}`;
   const label = cleanText(tool.label).replaceAll("\n", " ").trim();
   const category = toolCategories[tool.type] ?? "Tool";
-  const detail = label && label !== tool.type ? ` · ${label}` : "";
-  const lines: TranscriptLine[] = [{ text: `${status.icon} ${category}${detail}${duration}${exit}`, color: status.color, truncate: !showDetails }];
+  const detail = label && label !== tool.type ? label : "";
+  const prefix = tool.status === "failed" ? "!" : tool.type === "commandExecution" ? "$" : "·";
+  const summary = tool.type === "commandExecution" ? detail || category : `${category}${detail ? ` ${detail}` : ""}`;
+  const muted = tool.status === "failed" ? COLORS.error : COLORS.secondaryText;
+  const lines: TranscriptLine[] = [{
+    text: `${prefix} ${summary}${showDetails ? `${duration}${exit}` : ""}`,
+    color: muted,
+    indent: "   ",
+    truncate: !showDetails,
+  }];
+  if (showDetails) {
+    const input = formatToolInput(tool.input);
+    if (input) {
+      lines.push({ text: input, indent: "     ├─ ", preformatted: true, color: COLORS.secondaryText });
+    }
+  }
   if (showDetails && tool.output?.trim()) {
     lines.push({
       text: cleanText(tool.output).trimEnd(),
-      indent: "  │ ",
+      indent: "     └─ ",
       preformatted: true,
       color: tool.status === "failed" ? COLORS.error : COLORS.secondaryText,
     });
   }
   return lines;
+}
+
+function formatToolInput(input?: Record<string, unknown>): string {
+  if (!input) return "";
+  const entries = Object.entries(input).filter(([, value]) => value !== undefined);
+  if (!entries.length) return "";
+  return entries.map(([key, value]) => {
+    const rendered = typeof value === "string" ? value : JSON.stringify(value);
+    return `${key}: ${rendered ?? "null"}`;
+  }).join("\n");
 }
 
 export function planLines(plan: UiPlan): TranscriptLine[] {

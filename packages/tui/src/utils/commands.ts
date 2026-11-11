@@ -23,13 +23,14 @@ export const DICODE_COMMANDS = [
   { name: "agents", label: "Select agent", description: "Choose Build or Plan", group: "Agent", leader: "a", shortcut: "Shift+Tab" },
   { name: "plan", label: "Enter Plan mode", description: "Switch to Plan mode or submit an inline planning prompt", group: "Agent" },
   { name: "effort", label: "Reasoning effort", description: "Choose a reasoning level for the model", group: "Agent", shortcut: "Ctrl+T" },
+  { name: "permissions", label: "Permission mode", description: "Choose Codex defaults or full access for future turns", group: "Agent" },
   { name: "diff", label: "Review changes", description: "View the latest turn diff", group: "Session", needsSession: true },
   { name: "sidebar", label: "Toggle sidebar", description: "Show or hide session details", group: "Session", leader: "b", needsSession: true },
   { name: "tools", label: "Toggle tool details", description: "Expand or collapse tool output", group: "Session", needsSession: true },
   { name: "cancel-queue", label: "Remove queued prompt", description: "Restore the queued prompt to the composer", group: "Session", needsSession: true },
   { name: "status", label: "Runtime status", description: "View connection, project, and permissions", group: "Application", leader: "s" },
   { name: "help", label: "Show help", description: "Browse commands and shortcuts", group: "Application", leader: "h" },
-  { name: "quit", label: "Exit Dicode", description: "Close the terminal interface", group: "Application", aliases: ["exit", "q"], shortcut: "Ctrl+Q" },
+  { name: "quit", label: "Exit Dicode", description: "Close the terminal interface", group: "Application", aliases: ["exit", "q"], leader: "q", shortcut: "Ctrl+Q" },
 ] as const satisfies readonly CommandDefinition[];
 
 export type CommandName = typeof DICODE_COMMANDS[number]["name"];

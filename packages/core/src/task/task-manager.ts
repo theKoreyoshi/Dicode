@@ -73,6 +73,7 @@ export class TaskManager {
         model: input.model,
         effort: input.effort,
         mode: input.mode,
+        permissionMode: input.permissionMode,
       });
       this.eventManager.registerTurn(turn.id, sessionId, task.id);
       const current = this.taskRepo.get(task.id) ?? task;

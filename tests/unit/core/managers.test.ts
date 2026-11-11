@@ -10,6 +10,7 @@ import {
   TaskManager,
   TaskError,
   createDicodeCore,
+  DICODE_DEVELOPER_INSTRUCTIONS,
   deriveTitle,
 } from "@dicode/core";
 import { createHarness } from "./helpers.js";
@@ -35,10 +36,17 @@ function insertSession(harness: ReturnType<typeof createHarness>, id = "s1"): vo
 describe("SessionManager", () => {
   it("creates a session backed by a codex thread", async () => {
     const h = createHarness();
+    const createThread = vi.spyOn(h.adapter, "createThread");
+    const resumeThread = vi.spyOn(h.adapter, "resumeThread");
     const manager = new SessionManager(h.adapter, h.repos.session, h.state, h.events);
     const session = await manager.create({ projectPath: "C:/proj" });
     expect(session.codexThreadId).toBe("thread-1");
+    expect(createThread).toHaveBeenCalledWith({ cwd: "C:/proj", model: undefined, developerInstructions: DICODE_DEVELOPER_INSTRUCTIONS });
     expect(h.repos.session.get(session.id)?.status).toBe("idle");
+    await manager.resume(session.id);
+    expect(resumeThread).toHaveBeenCalledWith("thread-1", {
+      cwd: "C:/proj", developerInstructions: DICODE_DEVELOPER_INSTRUCTIONS,
+    });
   });
 
   it("derives a title from user text", () => {
@@ -104,6 +112,15 @@ describe("TaskManager", () => {
     expect(task.status).toBe("running");
     expect(h.repos.message.listBySession("s1")).toHaveLength(1);
     expect(h.repos.session.get("s1")?.title).toBe("hello world");
+  });
+
+  it("forwards the configured permission mode to the adapter", async () => {
+    const h = createHarness();
+    insertSession(h);
+    const startTurn = vi.spyOn(h.adapter, "startTurn");
+    const manager = new TaskManager(h.adapter, h.repos.session, h.repos.task, h.repos.message, h.state, h.events);
+    await manager.sendMessage("s1", { text: "run with full access", permissionMode: "full" });
+    expect(startTurn).toHaveBeenCalledWith("thread-1", expect.objectContaining({ permissionMode: "full" }));
   });
 
   it("enforces a session-level concurrency lock", async () => {
@@ -242,6 +259,34 @@ describe("ApprovalManager", () => {
 });
 
 describe("EventManager", () => {
+  it("emits only reasoning lifecycle duration and never persists private reasoning text", () => {
+    const h = createHarness();
+    insertSession(h);
+    const events: unknown[] = [];
+    const off = h.events.subscribe((event) => events.push(event));
+    const event = { id: "reasoning", sessionId: "thread-1", turnId: "turn-1", itemId: "thought-1", timestamp: 2_000 };
+
+    h.events.handleAdapterEvent({
+      ...event, type: "reasoning.delta", payload: { delta: "private chain of thought" },
+    });
+    h.events.handleAdapterEvent({
+      ...event, type: "item.started", payload: { item: { type: "reasoning", text: "private reasoning" } },
+    });
+    h.events.handleAdapterEvent({
+      ...event, type: "item.completed", payload: {
+        startedAtMs: 1_000,
+        completedAtMs: 2_125,
+        item: { type: "reasoning", text: "private reasoning", startedAtMs: 1_000, completedAtMs: 2_125 },
+      },
+    });
+
+    expect(events).toMatchObject([{ type: "thought.completed", payload: { durationMs: 1_125 } }]);
+    expect(JSON.stringify(events)).not.toContain("private");
+    expect(h.repos.message.listBySession("s1")).toEqual([]);
+    expect(h.repos.event.getLatestByType("s1", "thought.completed")?.payload).toEqual({ durationMs: 1_125 });
+    off();
+  });
+
   it("maps turn lifecycle to task state and accumulates agent text", () => {
     const h = createHarness();
     insertSession(h);
@@ -265,7 +310,7 @@ describe("EventManager", () => {
     const h = createHarness();
     insertSession(h);
     const event = { id: "evt", sessionId: "thread-1", turnId: "turn-1", itemId: "mcp-1", timestamp: Date.now() };
-    const item = { type: "mcpToolCall", server: "workspace", tool: "search" };
+    const item = { type: "mcpToolCall", server: "workspace", tool: "search", arguments: { query: "routes" } };
     const plan = { explanation: null, plan: [{ step: "Read sources", status: "inProgress" }] };
     h.events.handleAdapterEvent({ ...event, type: "plan.updated", payload: plan });
     h.events.handleAdapterEvent({ ...event, type: "item.completed", itemId: "plan-1", payload: { item: { type: "plan", text: "Read the project sources" } } });
@@ -274,9 +319,22 @@ describe("EventManager", () => {
     h.events.handleAdapterEvent({ ...event, type: "tool.completed", payload: { item: { ...item, status: "completed", result: {
       content: [{ type: "text", text: "Found index.ts" }, { type: "image", data: "large image payload" }],
     } } } });
+    h.events.handleAdapterEvent({
+      ...event,
+      itemId: "shell-1",
+      type: "tool.started",
+      payload: { item: { type: "commandExecution", command: "npm test", cwd: "C:\\work\\repo", source: "agent" } },
+    });
     expect(h.repos.event.getLatestByType("s1", "plan.updated")?.payload).toEqual(plan);
     expect(h.repos.message.listBySession("s1")).toMatchObject([{ itemId: "plan-1", kind: "plan", content: "Read the project sources" }]);
-    expect(h.repos.tool.listBySession("s1")).toMatchObject([{ toolName: "workspace/search", output: "Finding files\nFound index.ts\n[image]" }]);
+    const toolExecutions = h.repos.tool.listBySession("s1");
+    expect(toolExecutions.find((tool) => tool.toolName === "workspace/search")).toMatchObject({
+      input: { arguments: { query: "routes" }, server: "workspace", tool: "search" },
+      output: "Finding files\nFound index.ts\n[image]",
+    });
+    expect(toolExecutions.find((tool) => tool.toolName === "npm test")).toMatchObject({
+      input: { command: "npm test", cwd: "C:\\work\\repo", source: "agent" }, status: "running",
+    });
   });
 });
 

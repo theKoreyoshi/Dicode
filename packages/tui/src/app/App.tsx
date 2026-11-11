@@ -2,9 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { resolve } from "node:path";
 import { Box, Text, useApp, useStdout, type Key } from "ink";
 import type { DicodeCore } from "@dicode/core";
+import { PRODUCT_VERSION } from "@dicode/shared";
 import { COLORS } from "../theme/colors.js";
 import { Picker, type PickerItem } from "../components/CommandPalette.js";
-import { Header } from "../components/Header.js";
 import { COMPOSER_MAX_WIDTH, Input, measureComposerHeight } from "../components/Input.js";
 import { StatusBar } from "../components/StatusBar.js";
 import { ApprovalModal } from "../components/ApprovalModal.js";
@@ -20,7 +20,7 @@ import { cleanInput, editComposer, fileCompletion, moveBetweenLines } from "../u
 import { useDicodeApp } from "./useDicodeApp.js";
 import { useTerminalInput } from "./useTerminalInput.js";
 
-type Dialog = "commands" | "sessions" | "projects" | "models" | "model-config" | "agents" | "effort" | "status" | "diff";
+type Dialog = "commands" | "sessions" | "projects" | "models" | "model-config" | "agents" | "effort" | "permissions" | "status" | "diff";
 type Mode = "default" | "plan";
 const EMPTY_DIALOG = { query: "", index: 0 };
 const CONFIGURE_MODEL = "\0model-config";
@@ -31,7 +31,6 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   const [size, setSize] = useState(() => frameSize(stdout));
   const { columns, rows } = size;
   const tooSmall = rows < 7 || columns < 20;
-  const bodyRows = Math.max(1, rows - 2);
   useLayoutEffect(() => {
     const resize = () => {
       const next = frameSize(stdout);
@@ -44,6 +43,8 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   const app = useDicodeApp({ cwd, resume, core });
   const state = app.state;
+  const hasSession = Boolean(state.sessionId);
+  const bodyRows = Math.max(1, rows - Number(!hasSession));
   const authError = isAuthenticationError(state.error);
   const running = state.status === "running" || state.status === "waiting_approval";
   const approval = state.pendingApprovals[0];
@@ -81,7 +82,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   const commandItems = DICODE_COMMANDS.flatMap((command) => (
     "needsSession" in command && !state.sessionId ? [] : [{
-      id: command.name, label: command.label, detail: `/${command.name} · ${command.group}`,
+      id: command.name, label: `/${command.name}`, detail: command.description,
       hint: commandShortcut(command), aliases: "aliases" in command ? command.aliases.join(" ") : "",
     }]
   ));
@@ -112,6 +113,10 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     "model-config": [],
     agents: [{ id: "default", label: "Build", detail: "Implement and verify changes" },
       { id: "plan", label: "Plan", detail: "Explore the project and plan changes" }],
+    permissions: [
+      { id: "default", label: "Codex default", detail: "Use the sandbox and approval policy from Codex configuration.", hint: config?.agent.permissionMode !== "full" ? "current" : undefined },
+      { id: "full", label: "Allow all", detail: "danger-full-access · disables sandbox and approvals for future turns.", hint: config?.agent.permissionMode === "full" ? "current" : "HIGH RISK" },
+    ],
     effort: efforts.map((item) => ({
       id: item.reasoningEffort, label: item.reasoningEffort, detail: item.description,
       hint: item.reasoningEffort === activeEffort ? "current" : undefined,
@@ -145,17 +150,21 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   const suggestions = slashQuery !== undefined ? slashItems : fileItems;
   const suggestionIndex = Math.min(completionIndex, Math.max(0, suggestions.length - 1));
   const horizontalPadding = columns < 44 ? 1 : 2;
-  const composerWidth = Math.min(COMPOSER_MAX_WIDTH, Math.max(1, columns - horizontalPadding * 2));
+  const contextWidth = hasSession && state.sidebarVisible && columns >= 100 ? 42 : 0;
+  const mainWidth = Math.max(1, columns - contextWidth);
+  const composerWidth = Math.min(COMPOSER_MAX_WIDTH, Math.max(1, mainWidth - horizontalPadding * 2));
   const composerProps = {
     value: app.input, cursor, width: composerWidth,
     maxRows: Math.max(1, Math.min(5, Math.floor(bodyRows / 4))),
     compact: rows < 11, queued: state.queuedPrompt,
   };
   const promptRows = measureComposerHeight(composerProps);
-  const suggestionsRows = Math.max(0, Math.min(5, bodyRows - promptRows - 1 - Number(Boolean(state.sessionId))));
+  const helperRows = hasSession ? 0 : 1;
+  const suggestionsRows = Math.max(0, Math.min(10, bodyRows - promptRows - helperRows - 2));
   const suggestionsOpen = suggestionsRows > 0 && (slashQuery !== undefined || fileKey !== null);
-  const composerHeight = promptRows + (suggestionsOpen ? 1 + Math.max(1, Math.min(suggestionsRows, suggestions.length)) : 0);
-  const viewportRows = Math.max(1, bodyRows - composerHeight);
+  const visibleSuggestionRows = suggestionsOpen ? Math.max(1, Math.min(suggestionsRows, suggestions.length)) : 0;
+  const composerHeight = promptRows + helperRows + visibleSuggestionRows;
+  const transcriptRows = Math.max(1, bodyRows - composerHeight - Number(hasSession));
   const pageRows = Math.max(1, bodyRows - 2);
   const diffLines = activeDialog === "diff" && state.diff ? cleanInput(state.diff).split("\n") : [];
   const statusLines = [
@@ -165,6 +174,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     ["Model", activeModelId ?? "Runtime default"],
     ...(activeCustomModel ? [["Provider", activeCustomModel.baseUrl]] : []),
     ["Reasoning", activeEffort ?? "Runtime default"],
+    ["Permissions", config?.agent.permissionMode === "full" ? "Allow all · danger-full-access" : "Codex default"],
     ["Runtime", config?.runtime.codexPath ?? "Auto-detected"],
     ...(state.error ? [["Error", cleanInput(state.error).split("\n", 1)[0]]] : []),
   ];
@@ -180,7 +190,8 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   function openDialog(next: Dialog) {
     setDialog(next);
-    setPicker(EMPTY_DIALOG);
+    setPicker(next === "permissions" && config?.agent.permissionMode === "full"
+      ? { query: "", index: 1 } : EMPTY_DIALOG);
     if ((next === "models" || next === "effort") && !activeCustomModel) void app.listModels();
     if (next === "sessions") app.reloadSessions();
     if (next === "model-config") {
@@ -226,6 +237,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
         if (args && efforts.some((item) => item.reasoningEffort === args)) chooseEffort(args);
         else openDialog("effort");
         break;
+      case "permissions": openDialog("permissions"); break;
       case "sidebar": app.toggleSidebar(); break;
       case "tools": setShowToolDetails((visible) => !visible); break;
       case "cancel-queue": app.cancelQueuedPrompt(); break;
@@ -252,6 +264,21 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
         break;
       case "agents": setMode(item.id === "plan" ? "plan" : "default"); break;
       case "effort": chooseEffort(item.id); break;
+      case "permissions": {
+        const permissionMode = item.id === "full" ? "full" : "default";
+        try {
+          app.core?.updateConfig({ agent: { permissionMode } });
+          app.dispatch({
+            type: "SET_NOTICE",
+            message: permissionMode === "full"
+              ? "HIGH RISK · allow all enabled for future turns"
+              : "Codex permission defaults restored for future turns.",
+          });
+        } catch (error) {
+          app.dispatch({ type: "SET_ERROR", message: error instanceof Error ? error.message : String(error) });
+        }
+        break;
+      }
     }
   }
 
@@ -325,6 +352,14 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       const index = clampOffset(clampOffset(current.index, dialogLimit) + delta, dialogLimit);
       return index === current.index ? current : { ...current, index };
     });
+  }
+
+  function cycleSession(direction: -1 | 1) {
+    const sessions = state.sessions.filter((item) => !item.archived);
+    if (sessions.length < 2) return;
+    const current = sessions.findIndex((item) => item.id === state.sessionId);
+    const next = sessions[(current + direction + sessions.length) % sessions.length];
+    if (next) void app.resumeSession(next.id);
   }
 
   function handleModelConfig(input: string, key: Key) {
@@ -442,8 +477,10 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       case "cancel": void app.interrupt(); break;
       case "historyUp": moveHistory(-1); break;
       case "historyDown": moveHistory(1); break;
-      case "scrollUp": scrollTranscript(Math.max(1, viewportRows - 1)); break;
-      case "scrollDown": scrollTranscript(-Math.max(1, viewportRows - 1)); break;
+      case "scrollUp": scrollTranscript(Math.max(1, transcriptRows - 1)); break;
+      case "scrollDown": scrollTranscript(-Math.max(1, transcriptRows - 1)); break;
+      case "nextSession": cycleSession(1); break;
+      case "previousSession": cycleSession(-1); break;
       case "none": {
         const next = editComposer(app.input, cursor, { input, key });
         if (next.value !== app.input) {
@@ -478,57 +515,106 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   const composer = (
     <Box width={composerWidth} flexDirection="column" flexShrink={0}>
+      {suggestionsOpen && <Picker title={slashQuery !== undefined ? "Commands" : "Project files"}
+        items={suggestions} selectedIndex={suggestionIndex} rows={visibleSuggestionRows} inline autocomplete width={composerWidth}
+        empty={slashQuery !== undefined ? "No matching commands" : files?.key === fileKey ? "No matching files" : "Searching…"} />}
       <Input {...composerProps}
         focused={!approval && !dialog} running={running} mode={mode} model={activeModel?.displayName ?? activeModelId}
         effort={activeEffort} />
-      {suggestionsOpen && <Picker title={slashQuery !== undefined ? "Commands" : "Project files"}
-        items={suggestions} selectedIndex={suggestionIndex} rows={suggestionsRows} inline
-        empty={slashQuery !== undefined ? "No matching commands" : files?.key === fileKey ? "No matching files" : "Searching…"} />}
+      {!hasSession && (
+        <Box width={composerWidth} justifyContent="flex-end" flexShrink={0}>
+          <Text color={COLORS.secondaryText}>tab agents · ctrl+p commands</Text>
+        </Box>
+      )}
     </Box>
   );
+  const overlayWidth = Math.max(20, Math.min(72, columns - 4));
+  const overlayRows = Math.max(3, Math.min(16, rows - 2));
+  const overlayTitle = activeDialog === "commands" ? "Commands"
+    : activeDialog === "sessions" ? "Sessions"
+      : activeDialog === "projects" ? "Projects"
+        : activeDialog === "models" ? "Models"
+          : activeDialog === "agents" ? "Agents"
+            : activeDialog === "effort" ? "Reasoning effort"
+              : activeDialog === "permissions" ? "Permission mode" : "";
+  const compactStatus = activeDialog === "status" && rows < 12;
+  const notice = authError && !activeCustomModel
+    ? "Auth · dicode login (ChatGPT) or check credentials"
+    : state.error ?? state.notice;
+  const activeTool = state.tools.find((tool) => tool.status === "running");
+  const activity = activeTool?.type === "commandExecution" ? "Running command…"
+    : activeTool?.type === "fileChange" ? "Editing files…"
+      : activeTool?.type === "webSearch" ? "Searching…"
+        : activeTool ? "Running tool…" : "Thinking…";
+  const statusFooter = (
+    <StatusBar status={state.status} running={running} columns={mainWidth}
+      leaderActive={leaderActive} inputVisible={!activeDialog && !approval} activity={activity}
+      projectPath={state.projectPath} tokenUsage={state.tokenUsage} version={PRODUCT_VERSION} notice={notice} />
+  );
   return (
-    <Box flexDirection="column" width={columns} height={rows} overflow="hidden">
-      <Header status={state.status} projectName={state.projectName} sessionId={state.sessionId}
-        sessionTitle={session?.title} columns={columns} />
+    <Box position="relative" flexDirection="column" width={columns} height={rows} overflow="hidden">
       <Box height={bodyRows} flexDirection="column" flexShrink={0} overflow="hidden">
       {approval ? (
-        <ApprovalModal key={approval.id} approval={approval} rows={bodyRows} columns={columns}
-          onDecision={(decision) => app.respondApproval(approval.id, decision)} />
-      ) : activeDialog === "model-config" ? (
-        <ModelConfig {...modelForm} rows={bodyRows} columns={columns} enabled={Boolean(savedCustomModel)} />
-      ) : activeDialog === "status" ? (
-        <Box paddingX={1} flexDirection="column">
-          <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
-          {statusLines.slice(dialogOffset, dialogOffset + pageRows).map(([label, value]) => (
-            <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
-          ))}
-          <Text wrap="truncate-end" color={COLORS.secondaryText}>M configure model · ↑↓ scroll · Esc close</Text>
-        </Box>
-      ) : activeDialog === "diff" ? (
-        <Box paddingX={1} flexDirection="column">
-          <Text color={COLORS.accentBlue} bold>Latest turn changes</Text>
-          {diffLines.length ? diffLines.slice(dialogOffset, dialogOffset + pageRows).map((line, index) => (
-            <Text key={index} wrap="truncate-end" color={line.startsWith("+") ? COLORS.success : line.startsWith("-") ? COLORS.error : COLORS.text}>{line || " "}</Text>
-          )) : <Text color={COLORS.secondaryText}>No changes reported for this session.</Text>}
-          <Text wrap="truncate-end" color={COLORS.secondaryText}>↑↓ / PgUp PgDn scroll · Esc close</Text>
-        </Box>
-      ) : activeDialog ? (
-        <Picker title={{ commands: "Commands", sessions: "Sessions", projects: "Projects", models: "Models", agents: "Agents", effort: "Reasoning effort" }[activeDialog]}
-          items={filtered} query={picker.query} selectedIndex={selectedIndex}
-          rows={Math.max(1, Math.min(12, bodyRows - 5))} empty="No matches" />
-      ) : state.sessionId ? (
+        <Chat state={state} columns={columns} rows={bodyRows} scrollOffset={scrollOffset}
+          onScrollLimitChange={updateScrollLimit} showToolDetails={showToolDetails} footer={statusFooter} />
+      ) : compactStatus ? (
         <>
-          <Chat state={state} columns={columns} rows={viewportRows} scrollOffset={scrollOffset}
-            onScrollLimitChange={updateScrollLimit} showToolDetails={showToolDetails} />
-          <Box paddingX={horizontalPadding}>{composer}</Box>
+          <Box height={Math.max(1, bodyRows - 1)} paddingX={1} flexDirection="column" overflow="hidden">
+            <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
+            {statusLines.slice(dialogOffset, dialogOffset + pageRows).map(([label, value]) => (
+              <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
+            ))}
+            <Text wrap="truncate-end" color={COLORS.secondaryText}>M configure model · ↑↓ scroll · Esc close</Text>
+          </Box>
+          {statusFooter}
         </>
+      ) : state.sessionId ? (
+        <Chat state={state} columns={columns} rows={bodyRows} scrollOffset={scrollOffset}
+          onScrollLimitChange={updateScrollLimit} showToolDetails={showToolDetails}
+          composer={composer} composerHeight={composerHeight} footer={statusFooter} />
       ) : (
-        <Welcome columns={columns} rows={bodyRows} composerHeight={composerHeight}>{composer}</Welcome>
+        <Welcome columns={columns} rows={bodyRows} composerHeight={composerHeight} projectPath={state.projectPath}>{composer}</Welcome>
       )}
       </Box>
-      <StatusBar status={state.status} running={running} columns={columns}
-        leaderActive={leaderActive} inputVisible={!activeDialog && !approval}
-        notice={authError && !activeCustomModel ? "Auth · dicode login (ChatGPT) or check credentials" : state.error ?? state.notice} />
+      {!hasSession && <StatusBar status={state.status} running={running} columns={columns}
+        projectPath={state.projectPath} version={PRODUCT_VERSION} home notice={notice} />}
+      {(approval || activeDialog && !compactStatus) && (
+        <Box position="absolute" width={columns} height={rows} alignItems="center" justifyContent="center" overflow="hidden">
+          {approval ? (
+            <ApprovalModal key={approval.id} approval={approval} rows={overlayRows} columns={overlayWidth}
+              onDecision={(decision) => app.respondApproval(approval.id, decision)} />
+          ) : (
+            <Box width={overlayWidth} height={overlayRows} flexDirection="column" paddingX={1} paddingY={1}
+              borderStyle="single" borderColor={COLORS.border} overflow="hidden">
+              {activeDialog === "model-config" ? (
+                <ModelConfig {...modelForm} rows={overlayRows - 2} columns={overlayWidth - 2} enabled={Boolean(savedCustomModel)} />
+              ) : activeDialog === "status" ? (
+                <Box flexDirection="column">
+                  <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
+                  {statusLines.slice(dialogOffset, dialogOffset + Math.max(1, overlayRows - 5)).map(([label, value]) => (
+                    <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
+                  ))}
+                  <Text wrap="truncate-end" color={COLORS.secondaryText}>M configure model · ↑↓ scroll · Esc close</Text>
+                </Box>
+              ) : activeDialog === "diff" ? (
+                <Box flexDirection="column">
+                  <Text color={COLORS.accentBlue} bold>Latest turn changes</Text>
+                  {diffLines.length ? diffLines.slice(dialogOffset, dialogOffset + Math.max(1, overlayRows - 5)).map((line, index) => (
+                    <Text key={index} wrap="truncate-end" color={line.startsWith("+") ? COLORS.success : line.startsWith("-") ? COLORS.error : COLORS.text}>{line || " "}</Text>
+                  )) : <Text color={COLORS.secondaryText}>No changes reported for this session.</Text>}
+                  <Text wrap="truncate-end" color={COLORS.secondaryText}>↑↓ / PgUp PgDn scroll · Esc close</Text>
+                </Box>
+              ) : (
+                <>
+                  <Picker title={overlayTitle} items={filtered} query={picker.query} selectedIndex={selectedIndex}
+                    rows={Math.max(1, Math.min(8, overlayRows - 8))} empty="No matches" inline width={overlayWidth - 4} />
+                  <Text wrap="truncate-end" color={COLORS.dim}>↑↓ navigate · Enter select · Esc close</Text>
+                </>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -554,6 +640,7 @@ function filterItems<T extends PickerItem>(items: T[], query: string): T[] {
   return items.map((item) => ({
     item,
     score: Math.min(matchScore(item.label, query), matchScore(item.id, query),
-      matchScore(item.detail ?? "", query), matchScore("aliases" in item ? String(item.aliases) : "", query)),
+      matchScore(item.detail ?? "", query), matchScore(item.description ?? "", query),
+      matchScore("aliases" in item ? String(item.aliases) : "", query)),
   })).filter(({ score }) => Number.isFinite(score)).sort((a, b) => a.score - b.score).map(({ item }) => item);
 }

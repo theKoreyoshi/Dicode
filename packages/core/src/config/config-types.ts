@@ -12,6 +12,7 @@ export interface AgentConfig {
   defaultModel: string | null;
   customModel: CustomModelConfig | null;
   reasoningEffort: string | null;
+  permissionMode: "default" | "full";
   maxConcurrentSessions: number;
 }
 

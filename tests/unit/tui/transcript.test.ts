@@ -1,5 +1,6 @@
 import { PassThrough } from "node:stream";
 import { setImmediate } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 import type { ApprovalInfo, CoreEvent, CustomModelConfig, DicodeCore } from "@dicode/core";
 import { render } from "ink";
 import { createElement, type ReactElement } from "react";
@@ -98,17 +99,40 @@ function mountTerminal(view: ReactElement, rows = 12) {
 
 describe("terminal transcript", () => {
   it("keeps tools between the prompt and the answer and expands their output on request", () => {
-    const summary = frame(104, 14);
-    const expanded = frame(104, 14, true);
-    expect(summary).toContain("Shell · npm test · 123 ms · exit 0");
+    const summary = frame(150, 22);
+    const expanded = frame(150, 22, true);
+    expect(summary).toContain("1 command");
+    expect(summary).not.toContain("3 output lines");
     expect(summary).not.toContain("first test");
+    expect(summary).not.toContain("npm test");
+    expect(stripVTControlCharacters(summary)).toContain("┃ 请检查项目目录中的文件并解释模块的输入和输出行为。");
+    expect(expanded).toContain("$ npm test · 123 ms · exit 0");
     expect(expanded).toContain("first test");
     expect(expanded.indexOf("You")).toBeLessThan(expanded.indexOf("npm test"));
     expect(expanded.indexOf("npm test")).toBeLessThan(expanded.indexOf("All tests passed."));
     expect(expanded).toContain("1 file · +1 −1");
   });
 
-  it("hides commentary, partial answers, and phase-less drafts in the compact transcript", () => {
+  it("collapses consecutive calls from one turn into a muted inline summary", () => {
+    const view: UiState = {
+      ...state,
+      tools: [
+        { ...state.tools[0]!, id: "read", turnId: "turn-1", type: "fileRead", label: "package.json", timestamp: 2 },
+        { ...state.tools[0]!, id: "test", turnId: "turn-1", label: "npm test", timestamp: 2.5 },
+      ],
+    };
+    const summary = frame(80, 16, false, 0, view);
+    const expanded = frame(80, 16, true, 0, view);
+    expect(summary).toContain("1 read, 1 command");
+    expect(summary).not.toContain("Activity · 2 steps");
+    expect(summary).not.toContain("package.json");
+    expect(summary).not.toContain("first test");
+    expect(expanded).toContain("package.json");
+    expect(expanded).toContain("npm test");
+    expect(expanded).toContain("first test");
+  });
+
+  it("shows each streamed assistant phase in the default transcript", () => {
     const view: UiState = {
       ...state,
       status: "running",
@@ -122,10 +146,12 @@ describe("terminal transcript", () => {
       ],
     };
     const compact = frame(104, 20, false, 0, view);
-    expect(compact).toContain("npm test");
+    expect(compact).toContain("1 command");
+    expect(compact).toContain("A running commentary");
+    expect(compact).toContain("An intermediate answer");
+    expect(compact).toContain("Unclassified draft");
     expect(compact).toContain("The final answer");
-    expect(compact).not.toMatch(/running commentary|intermediate answer|Unclassified draft|first test/u);
-    expect(frame(104, 20, false, 0, { ...view, messages: view.messages.slice(0, -1) })).not.toContain("Unclassified draft");
+    expect(compact).not.toContain("first test");
     const expanded = frame(104, 20, true, 0, view);
     expect(expanded).toContain("A running commentary");
     expect(expanded).toContain("An intermediate answer");
@@ -133,7 +159,7 @@ describe("terminal transcript", () => {
     expect(expanded).toContain("first test");
   });
 
-  it("keeps the final unphased message of each completed legacy turn and shortens verbose tool labels", () => {
+  it("keeps all messages and shortens verbose tool labels", () => {
     const view: UiState = {
       ...state,
       status: "ready",
@@ -149,10 +175,13 @@ describe("terminal transcript", () => {
       tools: [{ ...state.tools[0], timestamp: 5, label: "npm test " + "long argument ".repeat(35) }],
     };
     const summary = frame(42, 22, false, 0, view);
+    expect(summary).toContain("Old draft");
     expect(summary).toContain("Old answer");
     expect(summary).toContain("Recent answer");
-    expect(summary).not.toMatch(/Old draft|Unfinished output|first test/u);
-    expect(summary.split("\n").filter((line) => line.includes("long argument"))).toHaveLength(1);
+    expect(summary).not.toMatch(/first test/u);
+    expect(summary).toContain("Unfinished output");
+    expect(summary).toContain("1 command");
+    expect(summary).not.toContain("long argument");
   });
 
   it("shows the latest or oldest rows in a narrow terminal without overflowing", () => {
@@ -187,9 +216,48 @@ describe("terminal transcript", () => {
       expect(latest()).not.toContain("Saved message 23");
 
       stdin.push("\u0010");
-      await vi.waitFor(() => expect(latest()).toContain("New session"));
+      await vi.waitFor(() => expect(latest()).toContain("/new"));
       stdin.push("\u001b");
       await vi.waitFor(() => expect(latest()).toContain("PgDn Newer"));
+    } finally {
+      app.unmount();
+    }
+  });
+
+  it("shows slash commands above the shared home composer in two columns", async () => {
+    const { app, stdin, latest } = mountTerminal(createElement(App, { core: stubCore() }), 20);
+    try {
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
+      stdin.push("/");
+      await vi.waitFor(() => expect(latest()).toContain("Choose Build or Plan"));
+      const output = latest();
+      expect(output).toContain("/agents");
+      expect(output.indexOf("/agents")).toBeLessThan(output.indexOf("┃ /"));
+      expect(output).not.toContain("Commands");
+      expect(output).toContain("tab agents · ctrl+p commands");
+    } finally {
+      app.unmount();
+    }
+  });
+
+  it("offers the high-risk allow-all permission mode from slash commands", async () => {
+    const updateConfig = vi.fn();
+    const core = stubCore({
+      getConfig: () => ({ agent: { permissionMode: "default" }, runtime: {} }),
+      updateConfig,
+    });
+    const { app, stdin, latest } = mountTerminal(createElement(App, { core }), 20);
+    try {
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
+      stdin.push("/permissions");
+      await vi.waitFor(() => expect(latest()).toContain("/permissions"));
+      stdin.push("\r");
+      await vi.waitFor(() => expect(latest()).toContain("Allow all"));
+      expect(latest()).toContain("HIGH RISK");
+      stdin.push("\u001b[B");
+      stdin.push("\r");
+      await vi.waitFor(() => expect(updateConfig).toHaveBeenCalledWith({ agent: { permissionMode: "full" } }));
+      expect(latest()).toContain("HIGH RISK");
     } finally {
       app.unmount();
     }
@@ -221,7 +289,7 @@ describe("terminal transcript", () => {
       expect(latest()).toContain("keep this draft");
 
       stdin.push("\u001b[A");
-      await vi.waitFor(() => expect(latest()).toMatch(/›\s+Saved message 22/u));
+      await vi.waitFor(() => expect(latest()).toContain("Saved message 22"));
       stdin.push("\u001b[B");
       await vi.waitFor(() => expect(latest()).toContain("keep this draft"));
     } finally {
@@ -232,14 +300,14 @@ describe("terminal transcript", () => {
   it("restores the start of the settings panel when the terminal grows to fit it", async () => {
     const { app, stdin, latest, resize } = mountTerminal(createElement(App, { core: stubCore() }), 9);
     try {
-      await vi.waitFor(() => expect(latest()).toContain("Ask Dicode about your project"));
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
       stdin.push("/status");
       await vi.waitFor(() => expect(latest()).toContain("/status"));
       stdin.push("\r");
       await vi.waitFor(() => expect(latest()).toContain("Connection"));
       stdin.push("\u001b[<65;15;5M");
       await vi.waitFor(() => expect(latest()).not.toContain("Connection"));
-      expect(latest()).toContain("Runtime settings");
+      expect(latest()).toContain("Agent");
 
       resize(19);
       await vi.waitFor(() => expect(latest()).toContain("Connection"));
@@ -266,12 +334,12 @@ describe("terminal transcript", () => {
       await vi.waitFor(() => expect(latest()).toContain("Type to search"));
       stdin.push("model-config");
       await vi.waitFor(() => expect(latest()).toContain("Search  model-config"));
-      expect(latest()).toContain("Configure custom model");
+      expect(latest()).toContain("/model-config");
       stdin.push("\r");
       await vi.waitFor(() => expect(latest()).toContain("Model configuration"));
     };
     try {
-      await vi.waitFor(() => expect(latest()).toContain("Ask Dicode about your project"));
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
       stdin.push("draft to keep");
       await vi.waitFor(() => expect(latest()).toContain("draft to keep"));
       await openEditor();
@@ -294,7 +362,7 @@ describe("terminal transcript", () => {
       stdin.push("\t");
       await vi.waitFor(() => expect(latest()).toContain("› Save and use"));
       stdin.push("\r");
-      await vi.waitFor(() => expect(latest()).toContain("draft to keep"));
+      await vi.waitFor(() => expect(saveCustomModel).toHaveBeenCalledTimes(2));
       expect(saveCustomModel).toHaveBeenLastCalledWith({
         model: "gateway-model", baseUrl: "https://test.gateway.example/v1", apiKeyEnv: "DICODE_TEST_MODEL_KEY",
       });
@@ -322,7 +390,7 @@ describe("terminal transcript", () => {
     const draft = /line one[^\n]*\n[^\n]*line two/u;
     const prompt = { text: "line one\nline two", model: "test-model", mode: "default" };
     try {
-      await vi.waitFor(() => expect(latest()).toContain("Ask Dicode about your project"));
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
       stdin.push("\u001b[200~line one\r\nline two\u001b[201~");
       await vi.waitFor(() => expect(latest()).toMatch(draft));
       expect(createSession).not.toHaveBeenCalled();
@@ -336,7 +404,7 @@ describe("terminal transcript", () => {
       expect(sendMessage).toHaveBeenCalledWith(session.id, expect.objectContaining(prompt));
 
       stdin.push("\r");
-      await vi.waitFor(() => expect(latest()).toContain("Ask Dicode about your project"));
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
       expect(createSession).toHaveBeenCalledTimes(1);
       expect(sendMessage).toHaveBeenCalledTimes(2);
       expect(sendMessage).toHaveBeenLastCalledWith(session.id, expect.objectContaining(prompt));
@@ -355,7 +423,7 @@ describe("terminal transcript", () => {
     });
     const { app, stdin, latest } = mountTerminal(createElement(App, { core }));
     try {
-      await vi.waitFor(() => expect(latest()).toContain("Ask Dicode about your project"));
+      await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
       stdin.push("/plan Prepare release");
       await vi.waitFor(() => expect(latest()).toContain("/plan Prepare release"));
       stdin.push("\r");
@@ -471,7 +539,7 @@ describe("terminal approval", () => {
       await setImmediate();
       expect(onDecision).not.toHaveBeenCalled();
       stdin.push("\u001b[B");
-      await vi.waitFor(() => expect(latest()).toContain("›  Allow this host for this session"));
+      await vi.waitFor(() => expect(latest()).toContain("Allow this host fo"));
       stdin.push("\r");
       await vi.waitFor(() => expect(onDecision).toHaveBeenCalledWith({
         kind: "custom", result: { decision: "acceptForSession" },

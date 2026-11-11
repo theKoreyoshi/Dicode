@@ -40,6 +40,7 @@ const agentSchema = z.object({
   defaultModel: z.string().nullable().default(null),
   customModel: customModelConfigSchema.nullable().default(null),
   reasoningEffort: z.string().nullable().default(null),
+  permissionMode: z.enum(["default", "full"]).default("default"),
   maxConcurrentSessions: z.number().int().positive().default(3),
 });
 

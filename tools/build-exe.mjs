@@ -78,7 +78,7 @@ execFileSync(NODE_EXE, ["--experimental-sea-config", join(DIST, "sea-config.json
 console.log("[4/4] injecting blob into", OUT_EXE, "...");
 copyFileSync(NODE_EXE, OUT_EXE);
 const postject = require.resolve("postject/dist/cli.js");
-execFileSync(process.execPath, [
+execFileSync(NODE_EXE, [
   postject,
   OUT_EXE,
   "NODE_SEA_BLOB",

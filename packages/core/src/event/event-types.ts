@@ -13,6 +13,7 @@ export type CoreEventType =
   | "message.submitted"
   | "message.delta"
   | "message.completed"
+  | "thought.completed"
   | "tool.started"
   | "tool.output"
   | "tool.completed"

@@ -33,6 +33,10 @@ export class CodexTurnManager implements TurnManager {
     };
     if (input.model) params.model = input.model;
     if (input.effort) params.effort = input.effort;
+    if (input.permissionMode === "full") {
+      params.approvalPolicy = "never";
+      params.sandboxPolicy = { type: "dangerFullAccess" };
+    }
     if (input.mode && input.model) {
       params.collaborationMode = {
         mode: input.mode,

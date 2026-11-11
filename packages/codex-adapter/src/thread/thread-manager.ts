@@ -28,6 +28,7 @@ export class CodexThreadManager implements ThreadManager {
     if (options.modelProvider) params.modelProvider = options.modelProvider;
     if (options.sandbox) params.sandbox = options.sandbox;
     if (options.approvalPolicy) params.approvalPolicy = options.approvalPolicy;
+    if (options.developerInstructions) params.developerInstructions = options.developerInstructions;
 
     const result = (await this.request(ClientMethods.threadStart, params)) as ThreadResult;
     return toThreadInfo(result.thread, result);
@@ -37,6 +38,7 @@ export class CodexThreadManager implements ThreadManager {
     const params: Record<string, unknown> = { threadId, excludeTurns: true };
     if (options.cwd) params.cwd = options.cwd;
     if (options.model) params.model = options.model;
+    if (options.developerInstructions) params.developerInstructions = options.developerInstructions;
 
     const result = (await this.request(ClientMethods.threadResume, params)) as ThreadResult;
     return toThreadInfo(result.thread, result);

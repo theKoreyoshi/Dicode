@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import { COLORS } from "../theme/colors.js";
 import { cleanInput, composerLines } from "../utils/composer.js";
 
@@ -23,36 +24,47 @@ type ComposerMeasureOptions = Pick<InputProps, "value" | "cursor" | "width" | "m
 
 export function measureComposerHeight({ value, cursor, width, maxRows, queued, compact }: ComposerMeasureOptions): number {
   const layout = composerLayout(width, compact);
-  return composerLines(value, cursor, layout.editableWidth, maxRows).length + (layout.framed ? 2 : 0) + 1 + Number(Boolean(queued));
+  return composerLines(value, cursor, layout.editableWidth, maxRows).length + 1 + Number(Boolean(queued));
 }
 
 export function Input({ value, cursor, width, maxRows, focused, running, mode, model, effort, queued, compact }: InputProps) {
   const layout = composerLayout(width, compact);
   const accent = focused ? COLORS.accentBlue : COLORS.border;
   const lines = composerLines(value, cursor, layout.editableWidth, maxRows);
-  const prompt = running ? "Send a follow-up…" : "Ask Dicode about your project…";
+  const prompt = running ? "Ask anything…" : 'Ask anything… "Fix broken tests"';
   return (
     <Box flexDirection="column" width={width} flexShrink={0}>
-      <Box flexDirection="column" flexShrink={0} paddingX={layout.padding}
-        borderStyle={layout.framed ? "round" : "single"} borderColor={accent}
-        borderTop={layout.framed} borderBottom={layout.framed} borderRight={layout.framed} borderLeft={layout.leftRail}>
-        {value ? lines.map((line, index) => (
-          <Text key={index} wrap="truncate-end" color={COLORS.text} backgroundColor={COLORS.primaryBackground}>
-            {layout.marker && <Text color={accent}>{index === 0 ? "› " : "  "}</Text>}
-            {line.before}
-            {line.cursor !== undefined && <Text inverse={focused}>{line.cursor}</Text>}
-            {line.after}
-            {" ".repeat(Math.max(0, layout.editableWidth - stringWidth(line.before + (line.cursor ?? "") + line.after)))}
-          </Text>
-        )) : (
-          <Text wrap="truncate-end" color={COLORS.secondaryText} backgroundColor={COLORS.primaryBackground}>
-            {layout.marker && <Text color={accent}>› </Text>}
-            <Text inverse={focused}> </Text>
-            {prompt}
-            {" ".repeat(Math.max(0, layout.editableWidth - 1 - stringWidth(prompt)))}
-          </Text>
-        )}
-      </Box>
+      {value ? lines.map((line, index) => {
+        const content = line.before + (line.cursor ?? "") + line.after;
+        return (
+          <Box key={index} flexDirection="row" width={width} height={1} flexShrink={0}>
+            <Text color={accent} bold>┃</Text>
+            <Box width={width - 1} height={1} flexShrink={0} overflow="hidden">
+              <Text wrap="truncate-end" color={COLORS.text} backgroundColor={COLORS.primaryBackground}>
+                {" ".repeat(layout.padding)}
+                {line.before}
+                {line.cursor !== undefined && <Text inverse={focused}>{line.cursor}</Text>}
+                {line.after}
+                {" ".repeat(layout.padding)}
+                {" ".repeat(Math.max(0, layout.editableWidth - stringWidth(content)))}
+              </Text>
+            </Box>
+          </Box>
+        );
+      }) : (
+        <Box flexDirection="row" width={width} height={1} flexShrink={0}>
+          <Text color={accent} bold>┃</Text>
+          <Box width={width - 1} height={1} flexShrink={0} overflow="hidden">
+            <Text wrap="truncate-end" color={COLORS.secondaryText} backgroundColor={COLORS.primaryBackground}>
+              {" ".repeat(layout.padding)}
+              <Text inverse={focused}> </Text>
+              {prompt}
+              {" ".repeat(layout.padding)}
+              {" ".repeat(Math.max(0, layout.editableWidth - 1 - stringWidth(prompt)))}
+            </Text>
+          </Box>
+        </Box>
+      )}
       {queued && (
         <Box height={1} paddingX={layout.padding} overflow="hidden">
           <Text wrap="truncate-end" color={COLORS.warning}>Queued · {cleanInput(queued).split("\n", 1)[0]}</Text>
@@ -64,44 +76,39 @@ export function Input({ value, cursor, width, maxRows, focused, running, mode, m
 }
 
 function ComposerSettings({ width, mode, model, effort }: Pick<InputProps, "width" | "mode" | "model" | "effort">) {
-  const labeled = width >= 56;
-  const modeColor = mode === "plan" ? COLORS.warning : COLORS.accentBlue;
   const showEffort = Boolean(effort && width >= 20);
-  const effortText = labeled ? `Effort ${effort}` : effort ?? "";
+  const modeValue = mode === "plan" ? "Plan" : "Build";
+  let modelValue = model && width >= 10 ? cleanInput(model).replace(/\s+/gu, " ") : "";
+  const effortValue = showEffort ? cleanInput(effort ?? "").replace(/\s+/gu, " ") : "";
+  const contentWidth = Math.max(0, width - 2);
+  const modelWidth = Math.max(0, contentWidth - stringWidth(modeValue) - (modelValue ? 3 : 0) - (effortValue ? stringWidth(` · ${effortValue}`) : 0));
+  if (modelValue && stringWidth(modelValue) > modelWidth) modelValue = truncateModel(modelValue, modelWidth);
+  const content = `${modeValue}${modelValue ? ` · ${modelValue}` : ""}${effortValue ? ` · ${effortValue}` : ""}`;
   return (
-    <Box width={width} height={1} flexShrink={0} paddingX={width >= 14 ? 1 : 0} gap={width >= 42 ? 2 : 1} overflow="hidden">
-      <Box flexShrink={0}>
-        <Setting label={labeled ? "Agent" : undefined} value={mode === "plan" ? "Plan" : "Build"} color={modeColor} />
+    <Box width={width} height={1} flexShrink={0} flexDirection="row" overflow="hidden">
+      <Text color={COLORS.accentBlue} bold>┃</Text>
+      <Box width={Math.max(1, width - 1)} height={1} flexShrink={0} overflow="hidden">
+        <Text wrap="truncate-end" backgroundColor={COLORS.primaryBackground}>
+          <Text> </Text>
+          <Text bold color={mode === "plan" ? COLORS.warning : COLORS.accentBlue}>{modeValue}</Text>
+          {modelValue && <Text><Text color={COLORS.dim}> · </Text><Text bold color={COLORS.text}>{modelValue}</Text></Text>}
+          {effortValue && <Text><Text color={COLORS.dim}> · </Text><Text bold color={COLORS.warning}>{effortValue}</Text></Text>}
+          {" ".repeat(Math.max(0, contentWidth - stringWidth(content)))}
+        </Text>
       </Box>
-      {width >= 10 && (
-        <Box minWidth={0} flexGrow={1} flexBasis={0} overflow="hidden">
-          <Setting label={labeled ? "Model" : undefined} value={model || "Runtime default"} />
-        </Box>
-      )}
-      {showEffort && (
-        <Box width={Math.min(stringWidth(effortText), Math.floor(width / 3))} flexShrink={0} overflow="hidden">
-          <Setting label={labeled ? "Effort" : undefined} value={effort ?? ""} />
-        </Box>
-      )}
     </Box>
   );
 }
 
-function Setting({ label, value, color = COLORS.text }: { label?: string; value: string; color?: string }) {
-  return (
-    <Text wrap="truncate-end">
-      {label && <Text color={COLORS.secondaryText}>{label} </Text>}
-      <Text bold color={color}>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
-    </Text>
-  );
+function truncateModel(value: string, width: number): string {
+  if (width < 1) return "";
+  if (width === 1) return "…";
+  const prefix = wrapAnsi(value, width - 1, { hard: true, wordWrap: false }).split("\n")[0] ?? "";
+  return `${prefix.trimEnd()}…`;
 }
 
 function composerLayout(width: number, compact = false) {
-  const framed = !compact && width >= 38;
-  const leftRail = width >= 4;
-  const padding = width >= 10 ? 1 : 0;
-  const marker = width >= 14;
-  const borderCells = framed ? 2 : Number(leftRail);
-  const editableWidth = Math.max(1, width - borderCells - padding * 2 - (marker ? 2 : 0));
-  return { framed, leftRail, padding, marker, editableWidth };
+  const padding = !compact && width >= 4 ? 1 : 0;
+  const editableWidth = Math.max(1, width - 1 - padding * 2);
+  return { framed: false, leftRail: true, padding, marker: false, editableWidth };
 }

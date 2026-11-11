@@ -6,6 +6,7 @@ export interface TurnInput {
   model?: string;
   effort?: string;
   mode?: "default" | "plan";
+  permissionMode?: "default" | "full";
 }
 
 export interface TurnInfo {

@@ -44,12 +44,14 @@ export interface StartThreadParams {
   model?: string;
   modelProvider?: string;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  developerInstructions?: string;
 }
 
 export interface ResumeThreadParams {
   threadId: string;
   cwd?: string;
   model?: string;
+  developerInstructions?: string;
 }
 
 export interface StartTurnParams {
@@ -57,6 +59,8 @@ export interface StartTurnParams {
   input: TextUserInput[];
   model?: string;
   effort?: string;
+  approvalPolicy?: "untrusted" | "on-request" | "never" | { granular: Record<string, boolean> };
+  sandboxPolicy?: { type: "dangerFullAccess" };
   collaborationMode?: {
     mode: "default" | "plan";
     settings: {

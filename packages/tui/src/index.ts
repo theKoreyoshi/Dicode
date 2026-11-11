@@ -1,5 +1,6 @@
 export { App } from "./app/App.js";
 export { useDicodeApp } from "./app/useDicodeApp.js";
+export { contextUsagePercent, formatContextUsage } from "./utils/token-usage.js";
 export { COLORS } from "./theme/colors.js";
 export { SYMBOLS } from "./theme/symbols.js";
 export { DICODE_LOGO, DICODE_TAGLINE } from "./theme/logo.js";
