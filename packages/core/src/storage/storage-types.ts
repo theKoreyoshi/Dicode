@@ -1,3 +1,5 @@
+import type { CustomModelConfig } from "../config/config-types.js";
+
 export interface ProjectRecord {
   id: string;
   name: string;
@@ -18,6 +20,7 @@ export interface SessionRecord {
   title: string;
   cwd: string;
   model: string | null;
+  customModel?: CustomModelConfig;
   status: SessionStatus;
   createdAt: number;
   updatedAt: number;

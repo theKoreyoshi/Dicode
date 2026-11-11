@@ -6,9 +6,10 @@ import { ApprovalManager } from "../approval/approval-manager.js";
 import { CapabilityManager } from "../capability/capability-manager.js";
 import type { CoreCapabilities } from "../capability/capability-types.js";
 import { ConfigManager } from "../config/config-manager.js";
-import type { DicodeConfig, DicodeConfigPatch } from "../config/config-types.js";
+import { customModelConfigSchema } from "../config/config-schema.js";
+import type { CustomModelConfig, DicodeConfig, DicodeConfigPatch } from "../config/config-types.js";
 import { ContextManager } from "../context/context-manager.js";
-import { CoreNotReadyError } from "../errors/core-errors.js";
+import { ConfigError, CoreNotReadyError } from "../errors/core-errors.js";
 import type { CoreEvent } from "../event/event-types.js";
 import { EventManager } from "../event/event-manager.js";
 import type { ProjectInfo } from "../project/project-types.js";
@@ -65,6 +66,7 @@ export class DicodeCore {
   private unsubscribeAdapterStatus: (() => void) | null = null;
   private unsubscribeApproval: (() => void) | null = null;
   private pendingSubscribers: Array<(event: CoreEvent) => void> = [];
+  private sessionOperationTail: Promise<void> = Promise.resolve();
   private readonly dataDirOption?: string;
 
   constructor(options: DicodeCoreOptions = {}) {
@@ -187,12 +189,13 @@ export class DicodeCore {
   // Session
   createSession(options: CreateSessionOptions): Promise<SessionInfo> {
     this.requireReady();
-    return this.sessionManager.create(options);
+    const customModel = this.getConfig().agent.customModel ?? undefined;
+    return this.withSessionRuntime(() => this.sessionManager.create(options, customModel));
   }
 
   resumeSession(sessionId: string): Promise<SessionInfo> {
     this.requireReady();
-    return this.sessionManager.resume(sessionId);
+    return this.withSessionRuntime(() => this.sessionManager.resume(sessionId));
   }
 
   listSessions(options?: ListSessionsOptions): SessionInfo[] {
@@ -214,7 +217,7 @@ export class DicodeCore {
 
   forkSession(sessionId: string): Promise<SessionInfo> {
     this.requireReady();
-    return this.sessionManager.fork(sessionId);
+    return this.withSessionRuntime(() => this.sessionManager.fork(sessionId));
   }
 
   renameSession(sessionId: string, title: string): SessionInfo {
@@ -228,7 +231,10 @@ export class DicodeCore {
   // Task
   sendMessage(sessionId: string, input: MessageInput): Promise<TaskInfo> {
     this.requireReady();
-    return this.taskManager.sendMessage(sessionId, input);
+    return this.withSessionRuntime(async () => {
+      await this.sessionManager.ensureLoaded(sessionId);
+      return this.taskManager.sendMessage(sessionId, input);
+    });
   }
 
   steerTask(sessionId: string, input: MessageInput): Promise<void> {
@@ -295,7 +301,19 @@ export class DicodeCore {
   }
 
   updateConfig(patch: DicodeConfigPatch): DicodeConfig {
-    return this.configManager.update(patch);
+    const config = this.configManager.update(patch);
+    this.stateManager?.update((state) => { state.config = config; });
+    return config;
+  }
+
+  saveCustomModel(input: CustomModelConfig | null): CustomModelConfig | null {
+    this.requireReady();
+    if (Object.keys(this.stateManager.getState().tasks.runningBySession).length > 0) {
+      throw new ConfigError("Finish or interrupt active turns before changing the default model.");
+    }
+    const parsed = customModelConfigSchema.nullable().safeParse(input);
+    if (!parsed.success) throw new ConfigError(parsed.error.issues[0]?.message ?? "Invalid custom model settings.");
+    return this.updateConfig({ agent: { customModel: parsed.data } }).agent.customModel;
   }
 
   getContext() {
@@ -304,7 +322,10 @@ export class DicodeCore {
 
   async listModels(): Promise<ModelInfo[]> {
     this.requireReady();
-    return this.adapter.listModels();
+    return this.withSessionRuntime(async () => {
+      await this.sessionManager.selectRuntimeModel();
+      return this.adapter.listModels();
+    });
   }
 
   async searchFiles(query: string): Promise<string[]> {
@@ -356,6 +377,15 @@ export class DicodeCore {
       const sessions = this.taskManager.endOwnedTasks("failed", "Codex App Server disconnected");
       this.approvalManager.expirePending(sessions);
     }
+  }
+
+  private withSessionRuntime<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.sessionOperationTail.then(() => {
+      this.requireReady();
+      return operation();
+    });
+    this.sessionOperationTail = pending.then(() => undefined, () => undefined);
+    return pending;
   }
 
   private requireReady(): void {

@@ -17,6 +17,7 @@ export interface TurnManager {
   getActiveTurnId(threadId: string): string | undefined;
   noteTurnStarted(threadId: string, turnId: string): void;
   noteTurnEnded(threadId: string, turnId?: string): void;
+  reset(): void;
 }
 
 export class CodexTurnManager implements TurnManager {
@@ -90,6 +91,11 @@ export class CodexTurnManager implements TurnManager {
   noteTurnEnded(threadId: string, turnId = this.activeTurns.get(threadId)): void {
     if (turnId) this.lastEndedTurns.set(threadId, turnId);
     if (this.activeTurns.get(threadId) === turnId) this.activeTurns.delete(threadId);
+  }
+
+  reset(): void {
+    this.activeTurns.clear();
+    this.lastEndedTurns.clear();
   }
 
   private requireActiveTurn(threadId: string, action: string): string {

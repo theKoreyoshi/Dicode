@@ -51,8 +51,9 @@ export class ConfigManager {
   update(patch: DicodeConfigPatch): DicodeConfig {
     const merged = deepMerge(this.config, patch) as DicodeConfig;
     const validated = dicodeConfigSchema.parse(merged);
-    this.config = { ...defaultConfig(), ...validated } as DicodeConfig;
-    this.persist(this.config);
+    const config = { ...defaultConfig(), ...validated } as DicodeConfig;
+    this.persist(config);
+    this.config = config;
     return this.config;
   }
 

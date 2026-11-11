@@ -14,6 +14,7 @@ export * from "./transport/jsonrpc-client.js";
 export * from "./client/capability-manager.js";
 export * from "./client/initialization.js";
 export * from "./client/codex-client.js";
+export { sameCustomModel, type CustomModelConfig } from "./client/model-provider.js";
 
 export * from "./thread/thread-types.js";
 export * from "./thread/thread-manager.js";

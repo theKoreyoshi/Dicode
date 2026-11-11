@@ -12,6 +12,7 @@ export function defaultConfig(): DicodeConfig {
     },
     agent: {
       defaultModel: null,
+      customModel: null,
       reasoningEffort: null,
       maxConcurrentSessions: 3,
     },

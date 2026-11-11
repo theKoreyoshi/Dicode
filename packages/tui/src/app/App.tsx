@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolve } from "node:path";
-import { Box, Text, useApp, useStdout } from "ink";
+import { Box, Text, useApp, useStdout, type Key } from "ink";
 import type { DicodeCore } from "@dicode/core";
 import { COLORS } from "../theme/colors.js";
 import { Picker, type PickerItem } from "../components/CommandPalette.js";
@@ -8,6 +8,7 @@ import { Header } from "../components/Header.js";
 import { COMPOSER_MAX_WIDTH, Input, measureComposerHeight } from "../components/Input.js";
 import { StatusBar } from "../components/StatusBar.js";
 import { ApprovalModal } from "../components/ApprovalModal.js";
+import { ModelConfig, modelConfigFields, type ModelConfigValues } from "../components/ModelConfig.js";
 import { Chat } from "../screens/Chat.js";
 import { Welcome } from "../screens/Welcome.js";
 import { resolveKeyAction } from "../utils/keyboard.js";
@@ -19,9 +20,10 @@ import { cleanInput, editComposer, fileCompletion, moveBetweenLines } from "../u
 import { useDicodeApp } from "./useDicodeApp.js";
 import { useTerminalInput } from "./useTerminalInput.js";
 
-type Dialog = "commands" | "sessions" | "projects" | "models" | "agents" | "effort" | "status" | "diff";
+type Dialog = "commands" | "sessions" | "projects" | "models" | "model-config" | "agents" | "effort" | "status" | "diff";
 type Mode = "default" | "plan";
 const EMPTY_DIALOG = { query: "", index: 0 };
+const CONFIGURE_MODEL = "\0model-config";
 
 export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; core?: DicodeCore }) {
   const { exit } = useApp();
@@ -49,6 +51,10 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   const [mode, setMode] = useState<Mode>("default");
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [picker, setPicker] = useState(EMPTY_DIALOG);
+  const [modelForm, setModelForm] = useState({
+    values: { model: "", baseUrl: "", apiKeyEnv: "" } as ModelConfigValues,
+    focus: 0, cursor: 0, error: null as string | null,
+  });
   const [leaderActive, setLeaderActive] = useState(false);
   const leaderTimer = useRef<ReturnType<typeof setTimeout>>();
   const [showToolDetails, setShowToolDetails] = useState(false);
@@ -80,11 +86,14 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     }]
   ));
   const config = app.core?.getConfig();
-  const activeModelId = state.selectedModel ?? session?.model ?? config?.agent.defaultModel ??
+  const savedCustomModel = config?.agent.customModel;
+  const activeCustomModel = state.sessionId ? session?.customModel : savedCustomModel;
+  const activeModelId = activeCustomModel?.model ?? state.selectedModel ?? session?.model ?? config?.agent.defaultModel ??
     state.models.find((item) => item.isDefault)?.model ?? null;
-  const activeModel = state.models.find((item) => item.model === activeModelId);
+  const activeModel = activeCustomModel ? undefined : state.models.find((item) => item.model === activeModelId);
   const efforts = activeModel?.supportedReasoningEfforts ?? [];
-  const activeEffort = state.selectedEffort ?? activeModel?.defaultReasoningEffort ?? config?.agent.reasoningEffort ?? null;
+  const activeEffort = activeCustomModel ? null
+    : state.selectedEffort ?? activeModel?.defaultReasoningEffort ?? config?.agent.reasoningEffort ?? null;
   const activeDialog = approval ? null : dialog;
   const dialogItems: PickerItem[] = ({
     commands: commandItems,
@@ -94,10 +103,13 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     projects: activeDialog === "projects" ? (app.core?.listProjects() ?? []).map((item) => ({
       id: item.path, label: item.name, detail: item.path, hint: item.path === state.projectPath ? "current" : undefined,
     })) : [],
-    models: state.models.filter((item) => !item.hidden).map((item) => ({
+    models: [...(activeCustomModel ? [{
+      id: activeCustomModel.model, label: activeCustomModel.model, detail: "Custom provider", hint: "current",
+    }] : state.models.filter((item) => !item.hidden).map((item) => ({
       id: item.model, label: item.displayName ?? item.model, detail: item.description,
       hint: item.model === activeModelId ? "current" : undefined,
-    })),
+    }))), { id: CONFIGURE_MODEL, label: "Configure custom model", detail: "/model-config" }],
+    "model-config": [],
     agents: [{ id: "default", label: "Build", detail: "Implement and verify changes" },
       { id: "plan", label: "Plan", detail: "Explore the project and plan changes" }],
     effort: efforts.map((item) => ({
@@ -151,6 +163,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     ["Project", state.projectPath ?? process.cwd()],
     ["Agent", mode === "plan" ? "Plan" : "Build"],
     ["Model", activeModelId ?? "Runtime default"],
+    ...(activeCustomModel ? [["Provider", activeCustomModel.baseUrl]] : []),
     ["Reasoning", activeEffort ?? "Runtime default"],
     ["Runtime", config?.runtime.codexPath ?? "Auto-detected"],
     ...(state.error ? [["Error", cleanInput(state.error).split("\n", 1)[0]]] : []),
@@ -168,8 +181,14 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   function openDialog(next: Dialog) {
     setDialog(next);
     setPicker(EMPTY_DIALOG);
-    if (next === "models" || next === "effort") void app.listModels();
+    if ((next === "models" || next === "effort") && !activeCustomModel) void app.listModels();
     if (next === "sessions") app.reloadSessions();
+    if (next === "model-config") {
+      const values = {
+        model: savedCustomModel?.model ?? "", baseUrl: savedCustomModel?.baseUrl ?? "", apiKeyEnv: savedCustomModel?.apiKeyEnv ?? "",
+      };
+      setModelForm({ values, focus: 0, cursor: values.model.length, error: null });
+    }
   }
 
   function chooseModel(id: string) {
@@ -190,6 +209,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
         else openDialog("projects");
         break;
       case "models": openDialog("models"); break;
+      case "model-config": openDialog("model-config"); break;
       case "agents": openDialog("agents"); break;
       case "plan":
         if (running) {
@@ -226,7 +246,10 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       }
       case "sessions": void app.resumeSession(item.id); break;
       case "projects": void app.openProject(item.id); break;
-      case "models": chooseModel(item.id); break;
+      case "models":
+        if (item.id === CONFIGURE_MODEL) openDialog("model-config");
+        else if (!activeCustomModel) chooseModel(item.id);
+        break;
       case "agents": setMode(item.id === "plan" ? "plan" : "default"); break;
       case "effort": chooseEffort(item.id); break;
     }
@@ -269,7 +292,9 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   async function sendPrompt(text: string, queue: boolean, promptMode: Mode) {
     const accepted = await app.sendMessage(text, {
-      model: state.selectedModel ?? undefined, effort: state.selectedEffort ?? undefined, mode: promptMode, queue,
+      model: activeCustomModel?.model ?? state.selectedModel ?? undefined,
+      effort: activeCustomModel ? undefined : state.selectedEffort ?? undefined,
+      mode: promptMode, queue,
     });
     if (!accepted) return;
     setHistory((entries) => [text, ...entries.filter((entry) => entry !== text)].slice(0, 100));
@@ -302,6 +327,37 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
     });
   }
 
+  function handleModelConfig(input: string, key: Key) {
+    const fieldCount = modelConfigFields.length;
+    const optionCount = fieldCount + (savedCustomModel ? 2 : 1);
+    if (key.tab || key.upArrow || key.downArrow || key.return && modelForm.focus < fieldCount) {
+      const direction = key.upArrow || key.tab && key.shift ? -1 : 1;
+      setModelForm((current) => {
+        const focus = (current.focus + direction + optionCount) % optionCount;
+        const field = modelConfigFields[focus];
+        return { ...current, focus, cursor: field ? current.values[field.id].length : 0 };
+      });
+      return;
+    }
+    if (key.return) {
+      try {
+        const { model, baseUrl, apiKeyEnv } = modelForm.values;
+        app.saveCustomModel(modelForm.focus === fieldCount ? { model, baseUrl, apiKeyEnv: apiKeyEnv.trim() || undefined } : null);
+        setDialog(null);
+      } catch (error) {
+        setModelForm((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
+      }
+      return;
+    }
+    setModelForm((current) => {
+      const field = modelConfigFields[current.focus];
+      if (!field) return current;
+      const next = editComposer(current.values[field.id], current.cursor, { input: input.replace(/[\r\n\t]/gu, ""), key });
+      if (next.value.length > field.limit) return current;
+      return { ...current, values: { ...current.values, [field.id]: next.value }, cursor: next.cursor, error: null };
+    });
+  }
+
   useTerminalInput((input, key, pasted) => {
     const action = pasted ? "none" :
       resolveKeyAction({ input, key }, { running, modalOpen: Boolean(activeDialog), inputFocused: true });
@@ -317,7 +373,15 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
         setDialog(null);
         return;
       }
+      if (activeDialog === "model-config") {
+        handleModelConfig(input, key);
+        return;
+      }
       if (activeDialog === "diff" || activeDialog === "status") {
+        if (activeDialog === "status" && !pasted && !key.ctrl && !key.meta && input.toLowerCase() === "m") {
+          openDialog("model-config");
+          return;
+        }
         const delta = key.pageUp ? -pageRows : key.pageDown ? pageRows : key.upArrow ? -1 : key.downArrow ? 1 : 0;
         if (delta) scrollDialog(delta);
         return;
@@ -430,13 +494,15 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       {approval ? (
         <ApprovalModal key={approval.id} approval={approval} rows={bodyRows} columns={columns}
           onDecision={(decision) => app.respondApproval(approval.id, decision)} />
+      ) : activeDialog === "model-config" ? (
+        <ModelConfig {...modelForm} rows={bodyRows} columns={columns} enabled={Boolean(savedCustomModel)} />
       ) : activeDialog === "status" ? (
         <Box paddingX={1} flexDirection="column">
           <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
           {statusLines.slice(dialogOffset, dialogOffset + pageRows).map(([label, value]) => (
             <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
           ))}
-          <Text wrap="truncate-end" color={COLORS.secondaryText}>↑↓ scroll · Esc close</Text>
+          <Text wrap="truncate-end" color={COLORS.secondaryText}>M configure model · ↑↓ scroll · Esc close</Text>
         </Box>
       ) : activeDialog === "diff" ? (
         <Box paddingX={1} flexDirection="column">
@@ -462,7 +528,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
       </Box>
       <StatusBar status={state.status} running={running} columns={columns}
         leaderActive={leaderActive} inputVisible={!activeDialog && !approval}
-        notice={authError ? "Auth · dicode login (ChatGPT) or check credentials" : state.error ?? state.notice} />
+        notice={authError && !activeCustomModel ? "Auth · dicode login (ChatGPT) or check credentials" : state.error ?? state.notice} />
     </Box>
   );
 }

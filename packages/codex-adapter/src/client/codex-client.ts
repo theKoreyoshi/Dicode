@@ -7,6 +7,7 @@ import { mapNotification } from "../events/event-mapper.js";
 import { Logger, logger } from "../logger.js";
 import { ClientMethods, ServerNotificationMethods } from "../protocol.js";
 import { ProcessManager, type ProcessManagerOptions } from "../process/process-manager.js";
+import { resolveProcessConfig, type ProcessConfig } from "../process/process-config.js";
 import { CodexThreadManager, type ThreadManager } from "../thread/thread-manager.js";
 import type { ForkThreadOptions, ListThreadOptions, ResumeThreadOptions, StartThreadOptions } from "../thread/thread-types.js";
 import { JsonRpcClient } from "../transport/jsonrpc-client.js";
@@ -17,6 +18,7 @@ import type { ModelInfo, ModelListResult } from "../protocol/protocol-types.js";
 import { CapabilityManager, type AdapterCapabilities } from "./capability-manager.js";
 import { initializeClient, type ClientInfo } from "./initialization.js";
 import { loginWithBrowser, type CodexAccountStatus } from "./account.js";
+import { customModelArguments, customProviderId, sameCustomModel, type CustomModelConfig } from "./model-provider.js";
 
 export type ConnectionStatus =
   | "disconnected"
@@ -48,7 +50,12 @@ export class CodexClient {
   readonly turnManager: TurnManager;
   readonly approvalManager: CodexApprovalManager;
 
-  private readonly processManager: ProcessManager;
+  private processManager: ProcessManager;
+  private readonly processConfig: ProcessConfig;
+  private readonly stopTimeoutMs?: number;
+  private customModel?: CustomModelConfig;
+  private providerSecret?: string;
+  private reconfiguration?: Promise<void>;
   private readonly capabilities = new CapabilityManager();
   private readonly clientInfo: ClientInfo;
   private readonly logger: Logger;
@@ -62,7 +69,9 @@ export class CodexClient {
     this.clientInfo = options.clientInfo ?? { name: PRODUCT_NAME, version: PRODUCT_VERSION };
     this.logger = options.logger ?? logger;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
-    this.processManager = new ProcessManager(options);
+    this.processConfig = options.config ?? resolveProcessConfig();
+    this.stopTimeoutMs = options.stopTimeoutMs;
+    this.processManager = this.createProcessManager();
 
     this.threadManager = new CodexThreadManager((method, params) =>
       this.requireRpc().request(method, params),
@@ -74,7 +83,6 @@ export class CodexClient {
       this.requireRpc().respond(id, result);
       this.eventBus.emit("approval.resolved", { payload: { id } });
     });
-
     this.approvalManager.onApproval((request) => {
       this.eventBus.emit("approval.requested", {
         sessionId: request.threadId,
@@ -82,11 +90,6 @@ export class CodexClient {
         itemId: request.itemId,
         payload: request,
       });
-    });
-
-    this.processManager.on("exit", () => this.handleProcessExit());
-    this.processManager.on("error", (error) => {
-      this.logger.error("app-server error", { message: error.message });
     });
   }
 
@@ -106,7 +109,9 @@ export class CodexClient {
       throw new AdapterNotReadyError("app-server stdio streams are unavailable");
     }
 
-    this.transport = new StdioTransport({ stdin, stdout, stderr: stderr ?? undefined, logger: this.logger });
+    this.transport = new StdioTransport({
+      stdin, stdout, stderr: stderr ?? undefined, logger: this.logger, providerSecret: this.providerSecret,
+    });
     this.rpc = new JsonRpcClient({ transport: this.transport, defaultTimeoutMs: this.defaultTimeoutMs });
     this.wireRpc();
 
@@ -125,12 +130,78 @@ export class CodexClient {
   }
 
   async stop(): Promise<void> {
+    await this.reconfiguration?.catch(() => undefined);
+    await this.stopRuntime();
+  }
+
+  async selectCustomModel(config?: CustomModelConfig): Promise<void> {
+    if (this.reconfiguration) throw new AdapterNotReadyError("Codex is already switching providers.");
+    if (sameCustomModel(config, this.customModel)) return;
+    const envName = config?.apiKeyEnv;
+    const secret = envName ? this.readEnvironmentVariable(envName)?.trim() : undefined;
+    if (envName && !secret) {
+      throw new AdapterNotReadyError(`Set the ${envName} environment variable before starting Dicode.`);
+    }
+    this.reconfiguration = this.restartRuntime(config, secret);
+    try {
+      await this.reconfiguration;
+    } finally {
+      this.reconfiguration = undefined;
+      this.setStatus(this.status);
+    }
+  }
+
+  private async restartRuntime(config?: CustomModelConfig, secret?: string): Promise<void> {
+    const previous = this.customModel;
+    const previousSecret = this.providerSecret;
+    await this.stopRuntime();
+    this.providerSecret = secret;
+    this.processManager = this.createProcessManager(config);
+    try {
+      await this.start();
+      this.customModel = config;
+    } catch (error) {
+      await this.stopRuntime();
+      this.providerSecret = previousSecret;
+      this.processManager = this.createProcessManager(previous);
+      await this.start().catch(() => undefined);
+      throw new AdapterNotReadyError("Codex could not start with the selected provider.", { cause: error });
+    }
+  }
+
+  private readEnvironmentVariable(name: string): string | undefined {
+    const environment = this.processConfig.env;
+    const key = process.platform === "win32"
+      ? Object.keys(environment).find((candidate) => candidate.toUpperCase() === name.toUpperCase()) ?? name
+      : name;
+    return environment[key];
+  }
+
+  private async stopRuntime(): Promise<void> {
     this.rpc?.close();
     this.rpc = null;
     this.transport = null;
     await this.processManager.stop();
     this.approvalManager.clear();
+    this.turnManager.reset();
     this.setStatus("disconnected");
+  }
+
+  private createProcessManager(config?: CustomModelConfig): ProcessManager {
+    const runtime = new ProcessManager({
+      config: {
+        ...this.processConfig,
+        args: config ? [...this.processConfig.args, ...customModelArguments(config)] : this.processConfig.args,
+      },
+      stopTimeoutMs: this.stopTimeoutMs,
+    });
+    runtime.on("exit", () => {
+      if (this.processManager === runtime) this.handleProcessExit();
+    });
+    runtime.on("error", (error) => {
+      this.logger.error("app-server error", { message: error.message });
+    });
+    return runtime;
   }
 
   getStatus(): ConnectionStatus {
@@ -210,14 +281,18 @@ export class CodexClient {
     return result.files.filter((file) => file.match_type === "file").slice(0, 8).map((file) => file.path);
   }
 
-  createThread(options?: StartThreadOptions): Promise<import("../thread/thread-types.js").ThreadInfo> {
+  async createThread(options?: StartThreadOptions): Promise<import("../thread/thread-types.js").ThreadInfo> {
     this.requireReady();
-    return this.threadManager.start(options);
+    const thread = await this.threadManager.start(options);
+    this.assertCustomModel(thread, options?.model);
+    return thread;
   }
 
-  resumeThread(threadId: string, options?: ResumeThreadOptions) {
+  async resumeThread(threadId: string, options?: ResumeThreadOptions) {
     this.requireReady();
-    return this.threadManager.resume(threadId, options);
+    const thread = await this.threadManager.resume(threadId, options);
+    this.assertCustomModel(thread, options?.model);
+    return thread;
   }
 
   listThreads(options?: ListThreadOptions) {
@@ -225,9 +300,11 @@ export class CodexClient {
     return this.threadManager.list(options);
   }
 
-  forkThread(threadId: string, options?: ForkThreadOptions) {
+  async forkThread(threadId: string, options?: ForkThreadOptions) {
     this.requireReady();
-    return this.threadManager.fork(threadId, options);
+    const thread = await this.threadManager.fork(threadId, options);
+    this.assertCustomModel(thread, options?.model);
+    return thread;
   }
 
   archiveThread(threadId: string): Promise<void> {
@@ -323,6 +400,14 @@ export class CodexClient {
     return this.rpc;
   }
 
+  private assertCustomModel(thread: { modelProvider?: string | null; model?: string | null }, model?: string): void {
+    const custom = this.customModel;
+    if (!custom) return;
+    if (thread.modelProvider !== customProviderId(custom) || thread.model !== (model ?? custom.model)) {
+      throw new AdapterNotReadyError("Codex did not select the configured custom model and provider. Check any managed Codex settings.");
+    }
+  }
+
   private requireReady(): void {
     if (this.status !== "ready") {
       throw new AdapterNotReadyError(`codex client is not ready (status: ${this.status})`);
@@ -331,6 +416,7 @@ export class CodexClient {
 
   private setStatus(status: ConnectionStatus): void {
     this.status = status;
+    if (this.reconfiguration) return;
     for (const listener of [...this.statusListeners]) {
       try {
         listener(status);

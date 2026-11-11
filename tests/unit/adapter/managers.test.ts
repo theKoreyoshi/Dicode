@@ -30,6 +30,18 @@ describe("CodexThreadManager", () => {
     expect(request).toHaveBeenCalledWith("thread/resume", { threadId: "th1", excludeTurns: true });
   });
 
+  it("reports the effective provider and model instead of saved thread summary values", async () => {
+    const request = vi.fn().mockResolvedValue({
+      thread: { id: "th1", modelProvider: "saved-provider", model: "saved-model" },
+      modelProvider: "runtime-provider",
+      model: "runtime-model",
+    });
+    const manager = new CodexThreadManager(request);
+    await expect(manager.resume("th1")).resolves.toMatchObject({
+      modelProvider: "runtime-provider", model: "runtime-model",
+    });
+  });
+
   it("lists threads from the data array", async () => {
     const request = vi.fn().mockResolvedValue({ data: [{ id: "a", preview: "one" }, { id: "b", preview: "two" }] });
     const manager = new CodexThreadManager(request);

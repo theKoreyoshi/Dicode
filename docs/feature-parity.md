@@ -11,6 +11,7 @@ Schema 和实际验证为准。参见 [App Server 文档](https://learn.chatgpt.
 | 流式回复、追加指令、中断 | `item/agentMessage/delta`、`turn/steer`、`turn/interrupt` | Adapter、Core、TUI | 真实流式与中断，追加指令有协议和自动化覆盖 |
 | 会话恢复 | `thread/resume` | Adapter、Core、TUI 通过 Dicode 会话索引恢复 | 真实重启恢复 |
 | 模型与推理强度 | `model/list`、`turn/start` | Adapter、Core、TUI | 模型目录实测，选择参数有测试 |
+| 自定义模型 | `model_providers`、`model_provider`、Responses API | `/model-config` 保存 Dicode 的模型 ID、地址与密钥变量名，新会话使用该提供商 | 真实运行时验证切换、恢复、凭据隔离和错误脱敏 |
 | Plan 模式 | `collaborationMode`、`turn/plan/updated`、`item/plan/delta` | Adapter、Core、TUI 提供 `/plan`、进度与最终方案 | 原生 Plan 事件与终端渲染分别验证 |
 | 命令、文件、MCP 工具 | 工具与输出通知、`turn/diff/updated` | Adapter、Core、TUI 展示工具、输出与最新一轮 Diff | 文件编辑和真实 Diff 有验证 |
 | 命令和文件审批 | App Server 双向审批请求与解析通知 | Adapter、Core、TUI 提供服务端允许的单次与会话范围 | 真实请求及中断撤回，终端选择有自动化覆盖 |

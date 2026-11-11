@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   createDicodeCore,
   type ApprovalDecision,
+  type CustomModelConfig,
   type DicodeCore,
   type MessageInput,
   type SessionInfo,
@@ -30,6 +31,7 @@ export interface DicodeAppApi {
   sendMessage: (text: string, options?: PromptOptions) => Promise<boolean>;
   cancelQueuedPrompt: () => void;
   listModels: () => Promise<void>;
+  saveCustomModel: (model: CustomModelConfig | null) => void;
   interrupt: () => Promise<void>;
   respondApproval: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
   toggleSidebar: () => void;
@@ -58,6 +60,11 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
   }, []);
 
   const activate = useCallback((c: DicodeCore, session: SessionInfo | null) => {
+    const previous = sessionRef.current ? c.getSession(sessionRef.current) : null;
+    if (session?.customModel || previous?.customModel) {
+      dispatch({ type: "SET_SELECTED_MODEL", model: null });
+      dispatch({ type: "SET_SELECTED_EFFORT", effort: null });
+    }
     if (!session) {
       sessionRef.current = null;
       dispatch({ type: "SET_SESSION", sessionId: null });
@@ -153,6 +160,7 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
         dispatch({ type: "SET_PROJECT", path: project.path, name: project.name });
         reloadSessions();
         const config = instance.getConfig().agent;
+        let customModelActive = Boolean(config.customModel);
         if (config.defaultModel) dispatch({ type: "SET_SELECTED_MODEL", model: config.defaultModel });
         if (config.reasoningEffort) dispatch({ type: "SET_SELECTED_EFFORT", effort: config.reasoningEffort });
         if (options.resume) {
@@ -162,6 +170,7 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
               const resumed = await instance.resumeSession(latest.id);
               if (disposed) return;
               activate(instance, resumed);
+              customModelActive = Boolean(resumed.customModel);
             } catch (error) {
               if (!disposed) reportError(error);
             }
@@ -172,9 +181,11 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
         if (disposed) return;
         setCore(instance);
         dispatch({ type: "SET_STATUS", status: "ready" });
-        void instance.listModels().then((models) => {
-          if (!disposed) dispatch({ type: "SET_MODELS", models });
-        }).catch(() => { /* The interactive model picker can retry explicitly. */ });
+        if (!customModelActive) {
+          void instance.listModels().then((models) => {
+            if (!disposed) dispatch({ type: "SET_MODELS", models });
+          }).catch(() => { /* The interactive model picker can retry explicitly. */ });
+        }
       } catch (error) {
         if (!disposed) {
           reportError(error);
@@ -281,8 +292,9 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
       const running = Boolean(c.getState().tasks.runningBySession[sessionId]);
       const config = c.getConfig().agent;
       const mode = options.mode;
-      let model = options.model ?? config.defaultModel ?? undefined;
-      const effort = options.effort ?? config.reasoningEffort ?? undefined;
+      const customModel = c.getSession(sessionId)?.customModel;
+      let model = customModel?.model ?? options.model ?? config.defaultModel ?? undefined;
+      const effort = customModel ? undefined : options.effort ?? config.reasoningEffort ?? undefined;
       if (mode && !model) {
         model = c.getSession(sessionId)?.model ?? undefined;
         if (!model) {
@@ -339,6 +351,21 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
     }
   }, [reportError]);
 
+  const saveCustomModel = useCallback((model: CustomModelConfig | null) => {
+    const c = coreRef.current;
+    if (c?.getStatus() !== "ready") throw new Error("Codex App Server is unavailable.");
+    const sessionId = sessionRef.current;
+    if (operationRef.current || sessionId && c.getState().tasks.runningBySession[sessionId]) {
+      throw new Error("Finish or interrupt the active turn before changing model configuration.");
+    }
+    const saved = c.saveCustomModel(model);
+    activate(c, null);
+    dispatch({ type: "SET_SELECTED_MODEL", model: null });
+    dispatch({ type: "SET_SELECTED_EFFORT", effort: null });
+    dispatch({ type: "SET_ERROR", message: null });
+    dispatch({ type: "SET_NOTICE", message: saved ? `New sessions use ${saved.model}.` : "New sessions use Codex defaults." });
+  }, [activate]);
+
   const interrupt = useCallback(async () => {
     const c = coreRef.current;
     const sessionId = sessionRef.current;
@@ -374,6 +401,7 @@ export function useDicodeApp(options: UseDicodeAppOptions = {}): DicodeAppApi {
     sendMessage,
     cancelQueuedPrompt,
     listModels,
+    saveCustomModel,
     interrupt,
     respondApproval,
     toggleSidebar: () => dispatch({ type: "TOGGLE_SIDEBAR" }),

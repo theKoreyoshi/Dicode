@@ -52,6 +52,46 @@ describe("SessionManager", () => {
     await manager.archive("s1");
     expect(h.repos.session.get("s1")?.archived).toBe(true);
   });
+
+  it("keeps a starting turn attached when a cross-provider resume is requested", async () => {
+    const h = createHarness();
+    const directory = mkdtempSync(join(tmpdir(), "dicode-core-provider-"));
+    const core = createDicodeCore({ adapter: h.adapter, configDir: directory, dataDir: directory });
+    const select = vi.fn().mockResolvedValue(undefined);
+    h.adapter.selectCustomModel = select;
+    let threadIndex = 0;
+    h.adapter.createThread = async (options) => ({ id: `thread-${++threadIndex}`, model: options?.model });
+    try {
+      await core.initialize();
+      const native = await core.createSession({ projectPath: directory });
+      const customModel = { model: "fixture-model", baseUrl: "http://localhost:4040/v1" };
+      core.saveCustomModel(customModel);
+      const custom = await core.createSession({ projectPath: directory });
+      expect(custom.customModel).toEqual(customModel);
+
+      const starting = core.sendMessage(custom.id, { text: "Use the fixture model" });
+      const resume = core.resumeSession(native.id);
+      const resumeResult = expect(resume).rejects.toThrow(/active turns/);
+      const active = await starting;
+      await resumeResult;
+      expect(select.mock.calls).toEqual([[customModel]]);
+      expect(() => core.saveCustomModel(null)).toThrow(/active turns/);
+
+      h.adapter.emitEvent({
+        id: "fixture-end", type: "turn.completed", timestamp: Date.now(), sessionId: custom.codexThreadId,
+        turnId: active.turnId ?? undefined, payload: { turn: { status: "completed" } },
+      });
+      core.saveCustomModel(null);
+      await core.resumeSession(native.id);
+      await core.resumeSession(custom.id);
+      expect(select.mock.calls).toEqual([[customModel], [undefined], [customModel]]);
+      expect(core.getSession(custom.id)?.customModel).toEqual(customModel);
+    } finally {
+      await core.shutdown();
+      h.db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("TaskManager", () => {

@@ -18,6 +18,7 @@ export interface StdioTransportOptions {
   stderr?: Readable;
   logger?: Logger;
   maxLineBytes?: number;
+  providerSecret?: string;
 }
 
 /**
@@ -28,6 +29,7 @@ export class StdioTransport {
   private readonly stdin: Writable;
   private readonly logger?: Logger;
   private readonly framer: LineFramer;
+  private readonly providerSecret?: string;
   private messageHandler: ((message: WireMessage) => void) | null = null;
   private errorHandler: ((error: Error) => void) | null = null;
   private stderrListener: ((chunk: Buffer) => void) | null = null;
@@ -35,6 +37,7 @@ export class StdioTransport {
   constructor(options: StdioTransportOptions) {
     this.stdin = options.stdin;
     this.logger = options.logger;
+    this.providerSecret = options.providerSecret;
 
     this.framer = new LineFramer({
       maxLineBytes: options.maxLineBytes,
@@ -46,10 +49,16 @@ export class StdioTransport {
     options.stdout.on("error", this.onStreamError);
 
     if (options.stderr) {
-      this.stderrListener = (chunk: Buffer) => {
-        this.logger?.debug(`app-server stderr: ${chunk.toString("utf8").trimEnd()}`);
-      };
-      options.stderr.on("data", this.stderrListener);
+      if (this.providerSecret) {
+        // Keep the pipe flowing without recording gateway diagnostics that may
+        // contain a reflected credential split across stderr chunks.
+        options.stderr.resume();
+      } else {
+        this.stderrListener = (chunk: Buffer) => {
+          this.logger?.debug(`app-server stderr: ${chunk.toString("utf8").trimEnd()}`);
+        };
+        options.stderr.on("data", this.stderrListener);
+      }
     }
   }
 
@@ -91,6 +100,36 @@ export class StdioTransport {
       this.errorHandler?.(error instanceof Error ? error : new Error(String(error)));
       return;
     }
+    if (this.providerSecret) redactProviderErrors(message, this.providerSecret);
     this.messageHandler?.(message);
   }
+}
+
+function redactProviderErrors(message: WireMessage, secret: string): void {
+  redactField(message, "error", secret);
+  const params = asRecord(message.params);
+  if (message.method === "error") redactField(params, "error", secret);
+  if (message.method === "warning") redactField(params, "message", secret);
+  redactField(asRecord(params?.turn), "error", secret);
+  redactField(asRecord(asRecord(message.result)?.turn), "error", secret);
+}
+
+function redactField(record: Record<string, unknown> | WireMessage | undefined, key: string, secret: string): void {
+  if (record && key in record) {
+    const fields = record as Record<string, unknown>;
+    fields[key] = redactValue(fields[key], secret);
+  }
+}
+
+function redactValue(value: unknown, secret: string): unknown {
+  if (typeof value === "string") return value.replaceAll(secret, "[redacted]");
+  if (Array.isArray(value)) return value.map((part) => redactValue(part, secret));
+  const record = asRecord(value);
+  return record
+    ? Object.fromEntries(Object.entries(record).map(([key, part]) => [key, redactValue(part, secret)]))
+    : value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
 }

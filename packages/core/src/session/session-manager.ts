@@ -1,6 +1,8 @@
+import { sameCustomModel } from "@dicode/codex-adapter";
 import type { AgentAdapter } from "../application/agent-adapter.js";
+import type { CustomModelConfig } from "../config/config-types.js";
 import type { EventManager } from "../event/event-manager.js";
-import { SessionError } from "../errors/core-errors.js";
+import { SessionError, UnsupportedCapabilityError } from "../errors/core-errors.js";
 import type { SessionRepository } from "../storage/repositories.js";
 import type { SessionStatus } from "../storage/storage-types.js";
 import type { StateManager } from "../state/state-manager.js";
@@ -9,6 +11,9 @@ import { nowMs } from "../utils/time.js";
 import type { CreateSessionOptions, ListSessionsOptions, SessionInfo } from "./session-types.js";
 
 export class SessionManager {
+  private readonly loadedSessions = new Set<string>();
+  private runtimeModel?: CustomModelConfig;
+
   constructor(
     private readonly adapter: AgentAdapter,
     private readonly sessionRepo: SessionRepository,
@@ -16,11 +21,13 @@ export class SessionManager {
     private readonly eventManager: EventManager,
   ) {}
 
-  async create(options: CreateSessionOptions): Promise<SessionInfo> {
+  async create(options: CreateSessionOptions, selectedModel?: CustomModelConfig): Promise<SessionInfo> {
     const cwd = options.cwd ?? options.projectPath;
+    const customModel = selectedModel ? { ...selectedModel, model: options.model ?? selectedModel.model } : undefined;
+    await this.selectRuntimeModel(customModel);
     const thread = await this.adapter.createThread({
       cwd,
-      model: options.model,
+      model: customModel?.model ?? options.model,
     });
 
     const now = nowMs();
@@ -30,7 +37,8 @@ export class SessionManager {
       projectPath: options.projectPath,
       title: options.title ?? "",
       cwd,
-      model: options.model ?? thread.model ?? null,
+      model: thread.model ?? customModel?.model ?? options.model ?? null,
+      ...(customModel ? { customModel } : {}),
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -40,6 +48,7 @@ export class SessionManager {
     };
 
     this.sessionRepo.insert(session);
+    this.loadedSessions.add(session.id);
     this.stateManager.update((s) => {
       s.sessions.sessions[session.id] = session;
       s.sessions.currentSessionId = session.id;
@@ -50,7 +59,7 @@ export class SessionManager {
 
   async resume(sessionId: string): Promise<SessionInfo> {
     const session = this.requireSession(sessionId);
-    await this.adapter.resumeThread(session.codexThreadId, { cwd: session.cwd });
+    await this.loadThread(session);
     session.lastActivityAt = nowMs();
     session.updatedAt = nowMs();
     this.sessionRepo.update(session);
@@ -60,6 +69,31 @@ export class SessionManager {
     });
     this.eventManager.emit("session.updated", { sessionId: session.id, payload: session });
     return session;
+  }
+
+  async ensureLoaded(sessionId: string): Promise<void> {
+    const session = this.requireSession(sessionId);
+    if (!this.loadedSessions.has(session.id)) await this.loadThread(session);
+  }
+
+  async selectRuntimeModel(model?: CustomModelConfig): Promise<void> {
+    if (sameCustomModel(this.runtimeModel, model)) return;
+    if (Object.keys(this.stateManager.getState().tasks.runningBySession).length > 0) {
+      throw new SessionError("SESSION_ALREADY_ACTIVE", "Finish or interrupt active turns before switching model providers.");
+    }
+    if (!this.adapter.selectCustomModel) throw new UnsupportedCapabilityError("This runtime does not support custom model providers.");
+    this.loadedSessions.clear();
+    await this.adapter.selectCustomModel(model);
+    this.runtimeModel = model;
+  }
+
+  private async loadThread(session: SessionInfo): Promise<void> {
+    await this.selectRuntimeModel(session.customModel);
+    await this.adapter.resumeThread(session.codexThreadId, {
+      cwd: session.cwd,
+      ...(session.customModel ? { model: session.model ?? session.customModel.model } : {}),
+    });
+    this.loadedSessions.add(session.id);
   }
 
   list(options: ListSessionsOptions = {}): SessionInfo[] {
@@ -98,6 +132,7 @@ export class SessionManager {
     const session = this.requireSession(sessionId);
     // Dicode-level removal only; the Codex thread history is not deleted.
     this.sessionRepo.delete(session.id);
+    this.loadedSessions.delete(session.id);
     this.stateManager.update((s) => {
       delete s.sessions.sessions[session.id];
       if (s.sessions.currentSessionId === session.id) s.sessions.currentSessionId = null;
@@ -107,6 +142,7 @@ export class SessionManager {
 
   async fork(sessionId: string, options: { cwd?: string; model?: string } = {}): Promise<SessionInfo> {
     const source = this.requireSession(sessionId);
+    await this.selectRuntimeModel(source.customModel);
     const thread = await this.adapter.forkThread(source.codexThreadId, options);
     const now = nowMs();
     const session: SessionInfo = {
@@ -116,6 +152,7 @@ export class SessionManager {
       title: `${source.title || "fork"} (fork)`,
       cwd: options.cwd ?? source.cwd,
       model: options.model ?? source.model,
+      ...(source.customModel ? { customModel: { ...source.customModel, model: options.model ?? source.customModel.model } } : {}),
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -124,6 +161,7 @@ export class SessionManager {
       metadata: { ...source.metadata, forkedFrom: source.id },
     };
     this.sessionRepo.insert(session);
+    this.loadedSessions.add(session.id);
     this.stateManager.update((s) => {
       s.sessions.sessions[session.id] = session;
     });

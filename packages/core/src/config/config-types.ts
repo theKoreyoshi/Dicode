@@ -1,3 +1,7 @@
+import type { CustomModelConfig } from "@dicode/codex-adapter";
+
+export type { CustomModelConfig };
+
 export interface UiConfig {
   theme: string;
   showToolOutput: boolean;
@@ -6,6 +10,7 @@ export interface UiConfig {
 
 export interface AgentConfig {
   defaultModel: string | null;
+  customModel: CustomModelConfig | null;
   reasoningEffort: string | null;
   maxConcurrentSessions: number;
 }

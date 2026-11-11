@@ -19,6 +19,7 @@ export const DICODE_COMMANDS = [
   { name: "sessions", label: "Switch session", description: "Find and resume a conversation", group: "Session", aliases: ["resume", "continue"], leader: "l", shortcut: "Ctrl+O" },
   { name: "cd", label: "Open project", description: "Open a recent project or enter /cd <directory>", group: "Session" },
   { name: "models", label: "Select model", description: "Choose a model from Codex", group: "Agent", aliases: ["model"], leader: "m" },
+  { name: "model-config", label: "Configure custom model", description: "Set a model ID, Responses API base URL, and key variable", group: "Agent" },
   { name: "agents", label: "Select agent", description: "Choose Build or Plan", group: "Agent", leader: "a", shortcut: "Shift+Tab" },
   { name: "plan", label: "Enter Plan mode", description: "Switch to Plan mode or submit an inline planning prompt", group: "Agent" },
   { name: "effort", label: "Reasoning effort", description: "Choose a reasoning level for the model", group: "Agent", shortcut: "Ctrl+T" },

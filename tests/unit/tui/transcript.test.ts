@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { setImmediate } from "node:timers/promises";
-import type { ApprovalInfo, CoreEvent, DicodeCore } from "@dicode/core";
+import type { ApprovalInfo, CoreEvent, CustomModelConfig, DicodeCore } from "@dicode/core";
 import { render } from "ink";
 import { createElement, type ReactElement } from "react";
 import stringWidth from "string-width";
@@ -245,6 +245,69 @@ describe("terminal transcript", () => {
       await vi.waitFor(() => expect(latest()).toContain("Connection"));
       expect(latest()).toContain("Project");
       expect(latest()).toContain("Auto-detected");
+    } finally {
+      app.unmount();
+    }
+  });
+
+  it("edits and saves a custom model from the command palette without submitting the current draft", async () => {
+    let customModel: CustomModelConfig | null = null;
+    const saveCustomModel = vi.fn((model: CustomModelConfig | null) => {
+      if (model && !model.model) throw new Error("Enter a model ID.");
+      customModel = model;
+      return model;
+    });
+    const sendMessage = vi.fn();
+    const { app, stdin, latest } = mountTerminal(createElement(App, {
+      core: stubCore({ getConfig: () => ({ agent: { customModel }, runtime: {} }), saveCustomModel, sendMessage }),
+    }), 18);
+    const openEditor = async () => {
+      stdin.push("\u0010");
+      await vi.waitFor(() => expect(latest()).toContain("Type to search"));
+      stdin.push("model-config");
+      await vi.waitFor(() => expect(latest()).toContain("Search  model-config"));
+      expect(latest()).toContain("Configure custom model");
+      stdin.push("\r");
+      await vi.waitFor(() => expect(latest()).toContain("Model configuration"));
+    };
+    try {
+      await vi.waitFor(() => expect(latest()).toContain("Ask Dicode about your project"));
+      stdin.push("draft to keep");
+      await vi.waitFor(() => expect(latest()).toContain("draft to keep"));
+      await openEditor();
+      stdin.push("\u001b[A");
+      await vi.waitFor(() => expect(latest()).toContain("› Save and use"));
+      stdin.push("\r");
+      await vi.waitFor(() => expect(latest()).toContain("Enter a model ID."));
+      stdin.push("\t");
+      await vi.waitFor(() => expect(latest()).toContain("› Model ID"));
+      stdin.push("gateway-model");
+      await vi.waitFor(() => expect(latest()).toContain("gateway-model"));
+      stdin.push("\t");
+      await vi.waitFor(() => expect(latest()).toContain("› Base URL"));
+      stdin.push("https://test.gateway.example/v1");
+      await vi.waitFor(() => expect(latest()).toContain("https://test.gateway.example/v1"));
+      stdin.push("\t");
+      await vi.waitFor(() => expect(latest()).toContain("› Key variable"));
+      stdin.push("DICODE_TEST_MODEL_KEY");
+      await vi.waitFor(() => expect(latest()).toContain("DICODE_TEST_MODEL_KEY"));
+      stdin.push("\t");
+      await vi.waitFor(() => expect(latest()).toContain("› Save and use"));
+      stdin.push("\r");
+      await vi.waitFor(() => expect(latest()).toContain("draft to keep"));
+      expect(saveCustomModel).toHaveBeenLastCalledWith({
+        model: "gateway-model", baseUrl: "https://test.gateway.example/v1", apiKeyEnv: "DICODE_TEST_MODEL_KEY",
+      });
+      expect(latest()).toContain("gateway-model");
+      expect(sendMessage).not.toHaveBeenCalled();
+
+      await openEditor();
+      stdin.push("\u001b[A");
+      await vi.waitFor(() => expect(latest()).toContain("› Use Codex defaults"));
+      stdin.push("\r");
+      await vi.waitFor(() => expect(latest()).toContain("draft to keep"));
+      expect(saveCustomModel).toHaveBeenLastCalledWith(null);
+      expect(latest()).not.toContain("gateway-model");
     } finally {
       app.unmount();
     }

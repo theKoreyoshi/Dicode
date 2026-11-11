@@ -183,9 +183,14 @@ async function forceKillTree(pid: number | undefined): Promise<void> {
   });
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | false> {
-  return Promise.race([
-    promise,
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), ms)),
-  ]);
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | false> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), ms); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

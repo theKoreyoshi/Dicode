@@ -2,6 +2,7 @@ import type {
   AdapterCapabilities,
   ApprovalDecision,
   ApprovalRequest,
+  CustomModelConfig,
   DicodeEvent,
   ForkThreadOptions,
   ListThreadOptions,
@@ -39,6 +40,7 @@ export interface AgentAdapter {
   steerTurn(threadId: string, input: TurnInput): Promise<void>;
   interruptTurn(threadId: string): Promise<void>;
   listModels(): Promise<ModelInfo[]>;
+  selectCustomModel?(config?: CustomModelConfig): Promise<void>;
   searchFiles?(root: string, query: string, cancellationToken: string): Promise<string[]>;
   onEvent(listener: (event: DicodeEvent) => void): () => void;
   onStatusChange(listener: (status: string) => void): () => void;

@@ -1,5 +1,21 @@
 # Test Report
 
+## Custom model configuration · 2026-11-11
+
+- TypeScript, ESLint, and all 159 unit tests passed. The terminal regression
+  covers editing and saving a model, restoring defaults, and preserving a draft.
+- The `custom-model-flow` integration test uses bundled Codex 0.167.0 and
+  local Responses endpoints. It verifies default and custom routing,
+  restarting and resuming a custom thread, keyed and unkeyed requests, and
+  credential redaction in a provider error. The original Codex configuration
+  file stayed byte-identical.
+- The packaged CLI passed a Windows ConPTY check for saving a local model,
+  reloading it after restart, and restoring the Codex defaults.
+
+```powershell
+npx vitest run --config vitest.integration.config.ts custom-model-flow
+```
+
 ## Final source review · 2026-11-10
 
 TypeScript, ESLint, 150 unit tests, and Inno Setup source validation passed.

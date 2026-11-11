@@ -95,11 +95,13 @@ export class TaskManager {
           freshSession.status = this.stateManager.getState().sessions.sessions[sessionId]?.status ?? "running";
         }
         freshSession.model = input.model ?? freshSession.model;
+        if (freshSession.customModel && input.model) freshSession.customModel = { ...freshSession.customModel, model: input.model };
         this.sessionRepo.update(freshSession);
         this.stateManager.update((s) => {
           const sess = s.sessions.sessions[sessionId];
           if (sess) {
             sess.model = freshSession.model;
+            sess.customModel = freshSession.customModel;
             sess.title = freshSession.title;
             sess.lastActivityAt = freshSession.lastActivityAt;
           }

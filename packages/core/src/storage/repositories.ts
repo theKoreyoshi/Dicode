@@ -1,4 +1,5 @@
 import type { Database } from "./database.js";
+import { customModelConfigSchema } from "../config/config-schema.js";
 import { readMessagePhase } from "../event/message-presentation.js";
 import type {
   ApprovalRecord,
@@ -78,7 +79,7 @@ export class SessionRepository {
         record.updatedAt,
         record.lastActivityAt,
         record.archived ? 1 : 0,
-        JSON.stringify(record.metadata),
+        sessionMetadata(record),
       );
   }
 
@@ -96,7 +97,7 @@ export class SessionRepository {
         record.updatedAt,
         record.lastActivityAt,
         record.archived ? 1 : 0,
-        JSON.stringify(record.metadata),
+        sessionMetadata(record),
         record.id,
       );
   }
@@ -426,6 +427,8 @@ function mapProject(row: Row): ProjectRecord {
 }
 
 function mapSession(row: Row): SessionRecord {
+  const { dicodeCustomModel, ...metadata } = parseJson<Record<string, unknown>>(str(row, "metadata"), {}) ?? {};
+  const customModel = dicodeCustomModel === undefined ? undefined : customModelConfigSchema.safeParse(dicodeCustomModel);
   return {
     id: str(row, "id"),
     codexThreadId: str(row, "codex_thread_id"),
@@ -433,13 +436,18 @@ function mapSession(row: Row): SessionRecord {
     title: str(row, "title"),
     cwd: str(row, "cwd"),
     model: nullableStr(row, "model"),
+    ...(customModel?.success ? { customModel: customModel.data } : {}),
     status: str(row, "status") as SessionRecord["status"],
     createdAt: num(row, "created_at"),
     updatedAt: num(row, "updated_at"),
     lastActivityAt: num(row, "last_activity_at"),
     archived: num(row, "archived") === 1,
-    metadata: parseJson(str(row, "metadata"), {}),
+    metadata,
   };
+}
+
+function sessionMetadata(session: SessionRecord): string {
+  return JSON.stringify({ ...session.metadata, dicodeCustomModel: session.customModel });
 }
 
 function mapTask(row: Row): TaskRecord {

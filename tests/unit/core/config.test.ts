@@ -49,6 +49,35 @@ describe("ConfigManager", () => {
     expect(reloaded.agent.defaultModel).toBe("deepseek-v4-pro");
   });
 
+  it("persists custom model metadata separately from the native model preference", () => {
+    const path = configPath();
+    const manager = new ConfigManager({ configPath: path });
+    manager.load();
+    manager.update({
+      agent: {
+        defaultModel: "native-model",
+        customModel: { model: "  gateway-model ", baseUrl: "https://GATEWAY.example/v1/", apiKeyEnv: "TEST_GATEWAY_KEY" },
+      },
+    });
+    expect(new ConfigManager({ configPath: path }).load().agent).toMatchObject({
+      defaultModel: "native-model",
+      customModel: { model: "gateway-model", baseUrl: "https://gateway.example/v1", apiKeyEnv: "TEST_GATEWAY_KEY" },
+    });
+    expect(manager.update({ agent: { customModel: null } }).agent).toMatchObject({ defaultModel: "native-model", customModel: null });
+  });
+
+  it.each([
+    "https://username:password@gateway.example/v1",
+    "https://gateway.example/v1?fixture=1",
+    "https://gateway.example/v1#fixture",
+    "http://gateway.example/v1",
+  ])("rejects unsafe authenticated endpoints without changing the active configuration", (baseUrl) => {
+    const manager = new ConfigManager({ configPath: configPath() });
+    manager.load();
+    expect(() => manager.update({ agent: { customModel: { model: "gateway-model", baseUrl, apiKeyEnv: "TEST_GATEWAY_KEY" } } })).toThrow();
+    expect(manager.get().agent.customModel).toBeNull();
+  });
+
   it("recovers from a corrupt config file", () => {
     const path = configPath();
     writeFileSync(path, "{ not valid json", "utf8");

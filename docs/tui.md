@@ -63,6 +63,28 @@ OpenCode's dedicated `!` shell composer, editor integration, and message-level
 undo and redo are outside this Dicode release. Codex tool executions are shown
 in the session transcript.
 
+## Custom models
+
+Open `/model-config`, choose **Configure custom model** in `/models` or the
+command palette, or press `M` in `/status`. Enter the provider's exact model ID
+and the base URL that serves the OpenAI Responses API, such as
+`https://gateway.example/v1`. Codex appends `/responses` to this base URL.
+A provider that only serves Chat Completions needs a Responses-compatible
+gateway. See [Codex custom model providers](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers).
+
+If the provider requires a bearer token, set a provider-specific environment
+variable in the shell before starting Dicode and enter its **name** in the
+**Key variable** field. Dicode stores the name with the model configuration.
+Use HTTPS for authenticated remote endpoints. For a local provider that allows
+unauthenticated requests, leave the field blank.
+
+Use Tab or the arrow keys to move through the form and Enter to select
+**Save and use**. The next conversation uses the configured provider and model.
+You can change the default later or select **Use Codex defaults** in the same
+form. Dicode preserves the draft and resumes existing sessions with their
+original provider settings. Wait for the active turn to finish or interrupt it
+before saving a different model configuration.
+
 ## Development
 
 ```powershell
