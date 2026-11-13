@@ -13,13 +13,16 @@ under the main column and shows the project path, available token usage, and
 command shortcut. Session switching remains available through the picker and
 keyboard shortcuts; there is no permanent session rail.
 
-Typing `/` opens command completion directly above the composer. It presents
-the actual Dicode slash commands and their descriptions in two columns, with
-the selected row highlighted. Ctrl+P remains the searchable command palette.
+Typing `/` opens command completion over the content above the composer.
+The input stays in place. The list shows commands and descriptions in two
+columns and highlights the selected row. Esc closes the list and reveals the
+content beneath it. Ctrl+P opens the searchable command palette.
 Dicode keeps its own Ink implementation and routes agent behavior through
 Codex App Server.
 
-The composer and submitted prompts use the same left rail. While a turn runs,
+The composer and submitted prompts use the same left rail. The composer adds
+a shaded row above and below the editable text when the terminal has room.
+While a turn runs,
 the footer animates a one-cell spinner with the current activity (`Thinking…`,
 `Running command…`, and related states) and `esc interrupt`. Tool history stays
 muted and indented: completed calls are grouped into category counts, while

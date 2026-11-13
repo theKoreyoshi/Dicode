@@ -12,12 +12,15 @@ interface WelcomeProps {
   projectPath?: string | null;
 }
 
+export function welcomeBrandRows(columns: number, rows: number, composerHeight: number): number {
+  return rows - composerHeight >= 9 && columns >= 58 ? DICODE_LOGO.split("\n").length + 1 : 0;
+}
+
 export function Welcome({ columns = 80, rows = 20, composerHeight = 4, children }: WelcomeProps) {
-  const spaceForBrand = rows - composerHeight;
   const padding = columns < 44 ? 1 : 2;
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={rows} paddingX={padding}>
-      {spaceForBrand >= 9 && columns >= 58 && (
+      {welcomeBrandRows(columns, rows, composerHeight) > 0 && (
         <Box flexDirection="column" alignItems="center" marginBottom={1} flexShrink={0}>
           <Text bold color={COLORS.secondaryText}>{DICODE_LOGO}</Text>
         </Box>

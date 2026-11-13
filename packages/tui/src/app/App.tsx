@@ -10,7 +10,7 @@ import { StatusBar } from "../components/StatusBar.js";
 import { ApprovalModal } from "../components/ApprovalModal.js";
 import { ModelConfig, modelConfigFields, type ModelConfigValues } from "../components/ModelConfig.js";
 import { Chat } from "../screens/Chat.js";
-import { Welcome } from "../screens/Welcome.js";
+import { Welcome, welcomeBrandRows } from "../screens/Welcome.js";
 import { resolveKeyAction } from "../utils/keyboard.js";
 import {
   commandShortcut, DICODE_COMMANDS, findCommand, findLeaderCommand,
@@ -160,12 +160,20 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
   };
   const promptRows = measureComposerHeight(composerProps);
   const helperRows = hasSession ? 0 : 1;
-  const suggestionsRows = Math.max(0, Math.min(10, bodyRows - promptRows - helperRows - 2));
+  const composerHeight = promptRows + helperRows;
+  const transcriptRows = Math.max(1, bodyRows - composerHeight - Number(hasSession));
+  const brandRows = welcomeBrandRows(columns, bodyRows, composerHeight);
+  // Welcome centers the logo and composer together. The chat composer follows the transcript.
+  const rowsAboveComposer = hasSession ? transcriptRows
+    : brandRows + Math.floor((bodyRows - composerHeight - brandRows) / 2);
+  const suggestionsRows = Math.max(0, Math.min(10, rowsAboveComposer));
   const suggestionsOpen = suggestionsRows > 0 && (slashQuery !== undefined || fileKey !== null);
   const visibleSuggestionRows = suggestionsOpen ? Math.max(1, Math.min(suggestionsRows, suggestions.length)) : 0;
-  const composerHeight = promptRows + helperRows + visibleSuggestionRows;
-  const transcriptRows = Math.max(1, bodyRows - composerHeight - Number(hasSession));
-  const pageRows = Math.max(1, bodyRows - 2);
+  const overlayRows = Math.min(16, rows - 2);
+  const overlayPadding = overlayRows >= 8 ? 1 : 0;
+  const overlayContentRows = overlayRows - 2 - overlayPadding * 2;
+  const compactStatus = activeDialog === "status" && rows < 12;
+  const pageRows = Math.max(1, compactStatus ? bodyRows - 3 : overlayContentRows - 2);
   const diffLines = activeDialog === "diff" && state.diff ? cleanInput(state.diff).split("\n") : [];
   const statusLines = [
     ["Connection", `Codex App Server · ${app.core?.getStatus() ?? "starting"}`],
@@ -515,21 +523,24 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
 
   const composer = (
     <Box width={composerWidth} flexDirection="column" flexShrink={0}>
-      {suggestionsOpen && <Picker title={slashQuery !== undefined ? "Commands" : "Project files"}
-        items={suggestions} selectedIndex={suggestionIndex} rows={visibleSuggestionRows} inline autocomplete width={composerWidth}
-        empty={slashQuery !== undefined ? "No matching commands" : files?.key === fileKey ? "No matching files" : "Searching…"} />}
+      {suggestionsOpen && (
+        <Box position="absolute" marginTop={-visibleSuggestionRows} width={composerWidth}>
+          <Picker title={slashQuery !== undefined ? "Commands" : "Project files"}
+            items={suggestions} selectedIndex={suggestionIndex} rows={visibleSuggestionRows} inline autocomplete width={composerWidth}
+            empty={slashQuery !== undefined ? "No matching commands" : files?.key === fileKey ? "No matching files" : "Searching…"} />
+        </Box>
+      )}
       <Input {...composerProps}
         focused={!approval && !dialog} running={running} mode={mode} model={activeModel?.displayName ?? activeModelId}
         effort={activeEffort} />
       {!hasSession && (
         <Box width={composerWidth} justifyContent="flex-end" flexShrink={0}>
-          <Text color={COLORS.secondaryText}>tab agents · ctrl+p commands</Text>
+          <Text wrap="truncate-end" color={COLORS.secondaryText}>tab agents · ctrl+p commands</Text>
         </Box>
       )}
     </Box>
   );
   const overlayWidth = Math.max(20, Math.min(72, columns - 4));
-  const overlayRows = Math.max(3, Math.min(16, rows - 2));
   const overlayTitle = activeDialog === "commands" ? "Commands"
     : activeDialog === "sessions" ? "Sessions"
       : activeDialog === "projects" ? "Projects"
@@ -537,7 +548,6 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
           : activeDialog === "agents" ? "Agents"
             : activeDialog === "effort" ? "Reasoning effort"
               : activeDialog === "permissions" ? "Permission mode" : "";
-  const compactStatus = activeDialog === "status" && rows < 12;
   const notice = authError && !activeCustomModel
     ? "Auth · dicode login (ChatGPT) or check credentials"
     : state.error ?? state.notice;
@@ -559,7 +569,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
           onScrollLimitChange={updateScrollLimit} showToolDetails={showToolDetails} footer={statusFooter} />
       ) : compactStatus ? (
         <>
-          <Box height={Math.max(1, bodyRows - 1)} paddingX={1} flexDirection="column" overflow="hidden">
+          <Box height={bodyRows - 1} paddingX={1} flexDirection="column" overflow="hidden">
             <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
             {statusLines.slice(dialogOffset, dialogOffset + pageRows).map(([label, value]) => (
               <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
@@ -584,14 +594,19 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
             <ApprovalModal key={approval.id} approval={approval} rows={overlayRows} columns={overlayWidth}
               onDecision={(decision) => app.respondApproval(approval.id, decision)} />
           ) : (
-            <Box width={overlayWidth} height={overlayRows} flexDirection="column" paddingX={1} paddingY={1}
+            <Box width={overlayWidth} height={overlayRows}>
+              {/* Ink 5 only paints text and borders, so paint the panel's empty cells first. */}
+              <Box position="absolute" flexDirection="column" width={overlayWidth} height={overlayRows}>
+                <Text backgroundColor={COLORS.background}>{Array(overlayRows).fill(" ".repeat(overlayWidth)).join("\n")}</Text>
+              </Box>
+              <Box width={overlayWidth} height={overlayRows} flexDirection="column" paddingX={1} paddingY={overlayPadding}
               borderStyle="single" borderColor={COLORS.border} overflow="hidden">
               {activeDialog === "model-config" ? (
-                <ModelConfig {...modelForm} rows={overlayRows - 2} columns={overlayWidth - 2} enabled={Boolean(savedCustomModel)} />
+                <ModelConfig {...modelForm} rows={overlayContentRows} columns={overlayWidth - 4} enabled={Boolean(savedCustomModel)} />
               ) : activeDialog === "status" ? (
                 <Box flexDirection="column">
                   <Text color={COLORS.accentBlue} bold>Runtime settings</Text>
-                  {statusLines.slice(dialogOffset, dialogOffset + Math.max(1, overlayRows - 5)).map(([label, value]) => (
+                  {statusLines.slice(dialogOffset, dialogOffset + pageRows).map(([label, value]) => (
                     <Text key={label} wrap="truncate-end"><Text color={COLORS.secondaryText}>{label.padEnd(12)}</Text>{cleanInput(value).replace(/\s+/gu, " ")}</Text>
                   ))}
                   <Text wrap="truncate-end" color={COLORS.secondaryText}>M configure model · ↑↓ scroll · Esc close</Text>
@@ -599,7 +614,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
               ) : activeDialog === "diff" ? (
                 <Box flexDirection="column">
                   <Text color={COLORS.accentBlue} bold>Latest turn changes</Text>
-                  {diffLines.length ? diffLines.slice(dialogOffset, dialogOffset + Math.max(1, overlayRows - 5)).map((line, index) => (
+                  {diffLines.length ? diffLines.slice(dialogOffset, dialogOffset + pageRows).map((line, index) => (
                     <Text key={index} wrap="truncate-end" color={line.startsWith("+") ? COLORS.success : line.startsWith("-") ? COLORS.error : COLORS.text}>{line || " "}</Text>
                   )) : <Text color={COLORS.secondaryText}>No changes reported for this session.</Text>}
                   <Text wrap="truncate-end" color={COLORS.secondaryText}>↑↓ / PgUp PgDn scroll · Esc close</Text>
@@ -611,6 +626,7 @@ export function App({ cwd, resume, core }: { cwd?: string; resume?: boolean; cor
                   <Text wrap="truncate-end" color={COLORS.dim}>↑↓ navigate · Enter select · Esc close</Text>
                 </>
               )}
+              </Box>
             </Box>
           )}
         </Box>

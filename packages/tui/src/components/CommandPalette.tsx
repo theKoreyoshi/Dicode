@@ -28,7 +28,10 @@ export function Picker({ title, query, items, selectedIndex, rows, empty, inline
       borderStyle={inline ? undefined : "single"} borderColor={COLORS.border}>
       {!autocomplete && <Text wrap="truncate-end" bold color={COLORS.accentBlue}>{title}</Text>}
       {!autocomplete && query !== undefined && <Text wrap="truncate-end" color={COLORS.secondaryText}>{query ? `Search  ${query}▏` : "Type to search…"}</Text>}
-      {items.length === 0 && <Text wrap="truncate-end" color={COLORS.dim}>{empty}</Text>}
+      {items.length === 0 && <Text wrap="truncate-end" color={COLORS.dim}
+        backgroundColor={autocomplete ? COLORS.primaryBackground : undefined}>
+        {empty}{autocomplete && " ".repeat(Math.max(0, (width ?? 60) - stringWidth(empty)))}
+      </Text>}
       {items.slice(start, start + rows).map((item, index) => {
         const selected = start + index === selectedIndex;
         const label = singleLine(item.label);
@@ -36,6 +39,7 @@ export function Picker({ title, query, items, selectedIndex, rows, empty, inline
         const hintWidth = stringWidth(item.hint ?? "");
         const rowWidth = Math.max(1, (width ?? 60) - (autocomplete ? 0 : 4));
         if (autocomplete) {
+          const background = selected ? COLORS.commandSelected : COLORS.primaryBackground;
           const labelWidth = Math.min(22, Math.max(10, Math.floor(rowWidth * 0.28)));
           const shownLabel = truncate(label, labelWidth);
           const shownDetail = truncate(detail, Math.max(0, rowWidth - labelWidth));
@@ -44,9 +48,9 @@ export function Picker({ title, query, items, selectedIndex, rows, empty, inline
           return (
             <Box key={item.id} width="100%" height={1} flexDirection="row" overflow="hidden">
               <Text wrap="truncate-end" color={selected ? COLORS.background : COLORS.text}
-                backgroundColor={selected ? COLORS.commandSelected : undefined}>{shownLabel}{labelPadding}</Text>
+                backgroundColor={background}>{shownLabel}{labelPadding}</Text>
               <Text wrap="truncate-end" color={selected ? COLORS.background : COLORS.secondaryText}
-                backgroundColor={selected ? COLORS.commandSelected : undefined}>{shownDetail}{fill}</Text>
+                backgroundColor={background}>{shownDetail}{fill}</Text>
             </Box>
           );
         }

@@ -10,12 +10,16 @@ import { StatusBar } from "../../../packages/tui/src/components/StatusBar.js";
 import { Welcome } from "../../../packages/tui/src/screens/Welcome.js";
 
 function frame(view: ReactElement, columns: number) {
+  return stripVTControlCharacters(rawFrame(view, columns)).split("\n");
+}
+
+function rawFrame(view: ReactElement, columns: number) {
   const stdout = Object.assign(new PassThrough(), { columns }) as unknown as NodeJS.WriteStream;
   let captured = "";
   stdout.on("data", (chunk: Buffer) => { captured += chunk.toString(); });
   const app = render(view, { stdout, debug: true, patchConsole: false });
   try {
-    return stripVTControlCharacters(captured).split("\n");
+    return captured;
   } finally {
     app.unmount();
   }
@@ -36,16 +40,30 @@ const composer: ComponentProps<typeof Input> = {
 };
 
 describe("terminal chrome", () => {
-  it("renders a measured flat composer with a separate one-line settings area", () => {
+  it("renders measured shaded padding and a continuous rail around the draft and settings", () => {
     const lines = frame(createElement(Input, composer), composer.width);
     expect(lines).toHaveLength(measureComposerHeight(composer));
-    expect(lines[0]).toMatch(/^┃ /u);
-    expect(lines[1]).toMatch(/^┃ /u);
-    expect(lines.join("\n")).toContain("检查这个中文路径");
+    expect(lines).toHaveLength(5);
+    expect(lines[0].trimEnd()).toBe("┃");
+    expect(lines[1]).toContain("┃ 检查这个中文路径");
+    expect(lines[2]).toContain("┃ 第二行");
+    expect(lines[3].trimEnd()).toBe("┃");
     expect(lines.at(-1)).toContain("Plan");
     expect(lines.at(-1)).toContain("gpt-6.1-terra");
     expect(lines.at(-1)).toContain("medium");
     expect(lines.every((line) => stringWidth(line) <= composer.width)).toBe(true);
+  });
+
+  it("shades the full blank rows around an empty prompt", () => {
+    const props = { ...composer, value: "", cursor: 0 };
+    const lines = rawFrame(createElement(Input, props), props.width).split("\n");
+    expect(lines).toHaveLength(measureComposerHeight(props));
+    expect(stripVTControlCharacters(lines[1])).toContain("Ask anything");
+    for (const index of [0, 2]) {
+      const line = stripVTControlCharacters(lines[index]);
+      expect(line.trimEnd()).toBe("┃");
+      if (/\u001b\[/u.test(lines[1])) expect(stringWidth(line)).toBe(props.width);
+    }
   });
 
   it("keeps wrapped drafts, queued status and settings within a narrow terminal", () => {
@@ -55,11 +73,11 @@ describe("terminal chrome", () => {
     };
     const lines = frame(createElement(Input, props), props.width);
     expect(lines).toHaveLength(measureComposerHeight(props));
-    expect(lines[0]).toMatch(/^┃ /u);
+    expect(lines[0].trimEnd()).toBe("┃");
     expect(lines.join("\n")).toContain("检查这个中文路径");
-    expect(lines.at(-2)).toContain("Queued");
-    expect(lines.at(-1)).toContain("Plan");
-    expect(lines.at(-1)).toContain("medium");
+    expect(lines.at(-2)).toContain("Plan");
+    expect(lines.at(-2)).toContain("medium");
+    expect(lines.at(-1)).toContain("Queued");
     expect(lines.every((line) => stringWidth(line) <= props.width)).toBe(true);
   });
 
@@ -68,6 +86,7 @@ describe("terminal chrome", () => {
     const rows = measureComposerHeight(props);
     const lines = frame(createElement(Welcome, { columns: 50, rows, composerHeight: rows },
       createElement(Input, props)), 50);
+    expect(rows).toBe(3);
     expect(lines).toHaveLength(rows);
     expect(lines.some((line) => line.includes("┃") && line.includes("检查这个中文路径"))).toBe(true);
     expect(lines.join("\n")).not.toContain("Dicode");

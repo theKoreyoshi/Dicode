@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
@@ -24,7 +25,7 @@ type ComposerMeasureOptions = Pick<InputProps, "value" | "cursor" | "width" | "m
 
 export function measureComposerHeight({ value, cursor, width, maxRows, queued, compact }: ComposerMeasureOptions): number {
   const layout = composerLayout(width, compact);
-  return composerLines(value, cursor, layout.editableWidth, maxRows).length + 1 + Number(Boolean(queued));
+  return composerLines(value, cursor, layout.editableWidth, maxRows).length + layout.verticalPadding * 2 + 1 + Number(Boolean(queued));
 }
 
 export function Input({ value, cursor, width, maxRows, focused, running, mode, model, effort, queued, compact }: InputProps) {
@@ -32,50 +33,59 @@ export function Input({ value, cursor, width, maxRows, focused, running, mode, m
   const accent = focused ? COLORS.accentBlue : COLORS.border;
   const lines = composerLines(value, cursor, layout.editableWidth, maxRows);
   const prompt = running ? "Ask anything…" : 'Ask anything… "Fix broken tests"';
+  const blank = " ".repeat(Math.max(0, width - 1));
   return (
     <Box flexDirection="column" width={width} flexShrink={0}>
+      {layout.verticalPadding > 0 && <ComposerRow width={width} accent={accent}>{blank}</ComposerRow>}
       {value ? lines.map((line, index) => {
         const content = line.before + (line.cursor ?? "") + line.after;
         return (
-          <Box key={index} flexDirection="row" width={width} height={1} flexShrink={0}>
-            <Text color={accent} bold>┃</Text>
-            <Box width={width - 1} height={1} flexShrink={0} overflow="hidden">
-              <Text wrap="truncate-end" color={COLORS.text} backgroundColor={COLORS.primaryBackground}>
-                {" ".repeat(layout.padding)}
-                {line.before}
-                {line.cursor !== undefined && <Text inverse={focused}>{line.cursor}</Text>}
-                {line.after}
-                {" ".repeat(layout.padding)}
-                {" ".repeat(Math.max(0, layout.editableWidth - stringWidth(content)))}
-              </Text>
-            </Box>
-          </Box>
+          <ComposerRow key={index} width={width} accent={accent}>
+            {" ".repeat(layout.padding)}
+            {line.before}
+            {line.cursor !== undefined && <Text inverse={focused}>{line.cursor}</Text>}
+            {line.after}
+            {" ".repeat(layout.padding)}
+            {" ".repeat(Math.max(0, layout.editableWidth - stringWidth(content)))}
+          </ComposerRow>
         );
       }) : (
-        <Box flexDirection="row" width={width} height={1} flexShrink={0}>
-          <Text color={accent} bold>┃</Text>
-          <Box width={width - 1} height={1} flexShrink={0} overflow="hidden">
-            <Text wrap="truncate-end" color={COLORS.secondaryText} backgroundColor={COLORS.primaryBackground}>
-              {" ".repeat(layout.padding)}
-              <Text inverse={focused}> </Text>
-              {prompt}
-              {" ".repeat(layout.padding)}
-              {" ".repeat(Math.max(0, layout.editableWidth - 1 - stringWidth(prompt)))}
-            </Text>
-          </Box>
-        </Box>
+        <ComposerRow width={width} accent={accent} color={COLORS.secondaryText}>
+          {" ".repeat(layout.padding)}
+          <Text inverse={focused}> </Text>
+          {prompt}
+          {" ".repeat(layout.padding)}
+          {" ".repeat(Math.max(0, layout.editableWidth - 1 - stringWidth(prompt)))}
+        </ComposerRow>
       )}
+      {layout.verticalPadding > 0 && <ComposerRow width={width} accent={accent}>{blank}</ComposerRow>}
+      <ComposerSettings width={width} accent={accent} mode={mode} model={model} effort={effort} />
       {queued && (
         <Box height={1} paddingX={layout.padding} overflow="hidden">
           <Text wrap="truncate-end" color={COLORS.warning}>Queued · {cleanInput(queued).split("\n", 1)[0]}</Text>
         </Box>
       )}
-      <ComposerSettings width={width} mode={mode} model={model} effort={effort} />
     </Box>
   );
 }
 
-function ComposerSettings({ width, mode, model, effort }: Pick<InputProps, "width" | "mode" | "model" | "effort">) {
+function ComposerRow({ width, accent, color = COLORS.text, children }: {
+  width: number;
+  accent: string;
+  color?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Box width={width} height={1} flexShrink={0} flexDirection="row" overflow="hidden">
+      <Text color={accent} bold>┃</Text>
+      <Box width={Math.max(1, width - 1)} height={1} flexShrink={0} overflow="hidden">
+        <Text wrap="truncate-end" color={color} backgroundColor={COLORS.primaryBackground}>{children}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+function ComposerSettings({ width, accent, mode, model, effort }: Pick<InputProps, "width" | "mode" | "model" | "effort"> & { accent: string }) {
   const showEffort = Boolean(effort && width >= 20);
   const modeValue = mode === "plan" ? "Plan" : "Build";
   let modelValue = model && width >= 10 ? cleanInput(model).replace(/\s+/gu, " ") : "";
@@ -85,18 +95,13 @@ function ComposerSettings({ width, mode, model, effort }: Pick<InputProps, "widt
   if (modelValue && stringWidth(modelValue) > modelWidth) modelValue = truncateModel(modelValue, modelWidth);
   const content = `${modeValue}${modelValue ? ` · ${modelValue}` : ""}${effortValue ? ` · ${effortValue}` : ""}`;
   return (
-    <Box width={width} height={1} flexShrink={0} flexDirection="row" overflow="hidden">
-      <Text color={COLORS.accentBlue} bold>┃</Text>
-      <Box width={Math.max(1, width - 1)} height={1} flexShrink={0} overflow="hidden">
-        <Text wrap="truncate-end" backgroundColor={COLORS.primaryBackground}>
-          <Text> </Text>
-          <Text bold color={mode === "plan" ? COLORS.warning : COLORS.accentBlue}>{modeValue}</Text>
-          {modelValue && <Text><Text color={COLORS.dim}> · </Text><Text bold color={COLORS.text}>{modelValue}</Text></Text>}
-          {effortValue && <Text><Text color={COLORS.dim}> · </Text><Text bold color={COLORS.warning}>{effortValue}</Text></Text>}
-          {" ".repeat(Math.max(0, contentWidth - stringWidth(content)))}
-        </Text>
-      </Box>
-    </Box>
+    <ComposerRow width={width} accent={accent}>
+      {" "}
+      <Text bold color={mode === "plan" ? COLORS.warning : COLORS.accentBlue}>{modeValue}</Text>
+      {modelValue && <Text><Text color={COLORS.dim}> · </Text><Text bold color={COLORS.text}>{modelValue}</Text></Text>}
+      {effortValue && <Text><Text color={COLORS.dim}> · </Text><Text bold color={COLORS.warning}>{effortValue}</Text></Text>}
+      {" ".repeat(Math.max(0, contentWidth - stringWidth(content)))}
+    </ComposerRow>
   );
 }
 
@@ -110,5 +115,5 @@ function truncateModel(value: string, width: number): string {
 function composerLayout(width: number, compact = false) {
   const padding = !compact && width >= 4 ? 1 : 0;
   const editableWidth = Math.max(1, width - 1 - padding * 2);
-  return { framed: false, leftRail: true, padding, marker: false, editableWidth };
+  return { padding, editableWidth, verticalPadding: compact ? 0 : 1 };
 }

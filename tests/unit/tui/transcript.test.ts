@@ -216,7 +216,10 @@ describe("terminal transcript", () => {
       expect(latest()).not.toContain("Saved message 23");
 
       stdin.push("\u0010");
-      await vi.waitFor(() => expect(latest()).toContain("/new"));
+      await vi.waitFor(() => expect(latest()).toContain("Type to search"));
+      const panel = latest().split("\n").filter((row) => /│.*│/u.test(row));
+      expect(panel.length).toBeGreaterThan(0);
+      expect(panel.join("\n")).not.toContain("Saved message");
       stdin.push("\u001b");
       await vi.waitFor(() => expect(latest()).toContain("PgDn Newer"));
     } finally {
@@ -228,13 +231,41 @@ describe("terminal transcript", () => {
     const { app, stdin, latest } = mountTerminal(createElement(App, { core: stubCore() }), 20);
     try {
       await vi.waitFor(() => expect(latest()).toContain("Ask anything"));
+      const promptRow = latest().split("\n").findIndex((row) => row.includes("Ask anything"));
       stdin.push("/");
       await vi.waitFor(() => expect(latest()).toContain("Choose Build or Plan"));
       const output = latest();
       expect(output).toContain("/agents");
       expect(output.indexOf("/agents")).toBeLessThan(output.indexOf("┃ /"));
+      expect(output.split("\n").findIndex((row) => row.includes("┃ /"))).toBe(promptRow);
+      const suggestions = output.split("\n").slice(0, promptRow).filter((row) => /\s\/\w/u.test(row));
+      expect(suggestions.every((row) => !row.includes("█"))).toBe(true);
       expect(output).not.toContain("Commands");
       expect(output).toContain("tab agents · ctrl+p commands");
+    } finally {
+      app.unmount();
+    }
+  });
+
+  it("covers the transcript behind slash suggestions and restores it without moving the composer", async () => {
+    const messages = Array.from({ length: 15 }, (_, index) => ({
+      id: `covered-${index}`, role: "assistant", content: `Background transcript ${index}`, createdAt: index + 1,
+    }));
+    const { app, stdin, latest } = mountTerminal(createElement(App, {
+      core: stubCore({ getMessages: () => messages }), resume: true,
+    }), 20);
+    try {
+      await vi.waitFor(() => expect(latest()).toContain("Background transcript 14"));
+      const promptRow = latest().split("\n").findIndex((row) => row.includes("Ask anything"));
+      stdin.push("/");
+      await vi.waitFor(() => expect(latest()).toContain("Choose Build or Plan"));
+      const rows = latest().split("\n");
+      expect(rows.findIndex((row) => row.includes("┃ /"))).toBe(promptRow);
+      expect(rows.filter((row) => /^\s*\/\w/u.test(row)).join("\n")).not.toContain("Background transcript");
+      expect(latest()).not.toContain("Background transcript 14");
+      stdin.push("\u001b");
+      await vi.waitFor(() => expect(latest()).toContain("Background transcript 14"));
+      expect(latest()).not.toContain("Choose Build or Plan");
     } finally {
       app.unmount();
     }
@@ -307,7 +338,8 @@ describe("terminal transcript", () => {
       await vi.waitFor(() => expect(latest()).toContain("Connection"));
       stdin.push("\u001b[<65;15;5M");
       await vi.waitFor(() => expect(latest()).not.toContain("Connection"));
-      expect(latest()).toContain("Agent");
+      expect(latest()).toContain("Auto-detected");
+      expect(latest()).toContain("M configure model");
 
       resize(19);
       await vi.waitFor(() => expect(latest()).toContain("Connection"));
